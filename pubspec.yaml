@@ -1,17 +1,7 @@
-name: flutternaut
-description: "A concise Semantics wrapper for Flutter test automation. Provides named constructors for common UI patterns (buttons, inputs, text, list items, checkboxes)."
-version: 0.0.1
-homepage:
-
+name: _
+publish_to: none
 environment:
-  sdk: ">=2.17.0 <4.0.0"
-  flutter: ">=3.0.0"
-
-dependencies:
-  flutter:
-    sdk: flutter
-
-dev_dependencies:
-  flutter_test:
-    sdk: flutter
-  flutter_lints: ^6.0.0
+  sdk: ^3.6.0
+workspace:
+  - packages/flutternaut
+  - packages/flutternaut_generator

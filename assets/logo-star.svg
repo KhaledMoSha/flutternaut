@@ -1,0 +1,114 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Deep space radial background -->
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1a1040"/>
+      <stop offset="100%" stop-color="#0A0E1A"/>
+    </radialGradient>
+
+    <!-- Star arm gradients — each arm has its own color shift -->
+    <linearGradient id="armTop" x1="0.5" y1="1" x2="0.5" y2="0">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="armRight" x1="0" y1="0.5" x2="1" y2="0.5">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="armBottom" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#22D3EE"/>
+    </linearGradient>
+    <linearGradient id="armLeft" x1="1" y1="0.5" x2="0" y2="0.5">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#A78BFA"/>
+    </linearGradient>
+
+    <!-- Center glow -->
+    <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#22D3EE" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Outer ring glow -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="256" fill="url(#bg)"/>
+
+  <!-- Subtle orbit rings -->
+  <circle cx="256" cy="256" r="180" fill="none" stroke="#6366F1" stroke-opacity="0.08" stroke-width="1"/>
+  <circle cx="256" cy="256" r="130" fill="none" stroke="#22D3EE" stroke-opacity="0.06" stroke-width="1"/>
+
+  <!-- ====== CONSTELLATION DOTS (discovered elements) ====== -->
+  <!-- These represent semantic elements scattered across the app -->
+
+  <!-- Outer ring constellation -->
+  <circle cx="256" cy="68"  r="3" fill="#22D3EE" opacity="0.7" filter="url(#glow)"/>
+  <circle cx="370" cy="100" r="2" fill="#A78BFA" opacity="0.5"/>
+  <circle cx="430" cy="180" r="2.5" fill="#22D3EE" opacity="0.6"/>
+  <circle cx="448" cy="280" r="2" fill="#A78BFA" opacity="0.4"/>
+  <circle cx="400" cy="380" r="3" fill="#22D3EE" opacity="0.5" filter="url(#glow)"/>
+  <circle cx="310" cy="430" r="2" fill="#A78BFA" opacity="0.5"/>
+  <circle cx="200" cy="440" r="2.5" fill="#22D3EE" opacity="0.6"/>
+  <circle cx="100" cy="380" r="2" fill="#A78BFA" opacity="0.4"/>
+  <circle cx="72"  cy="280" r="3" fill="#22D3EE" opacity="0.5" filter="url(#glow)"/>
+  <circle cx="80"  cy="170" r="2" fill="#A78BFA" opacity="0.5"/>
+  <circle cx="140" cy="100" r="2.5" fill="#22D3EE" opacity="0.6"/>
+
+  <!-- Faint constellation lines connecting some dots to the center -->
+  <g stroke="#6366F1" stroke-opacity="0.12" stroke-width="0.8">
+    <line x1="256" y1="68" x2="256" y2="180"/>
+    <line x1="430" y1="180" x2="332" y2="220"/>
+    <line x1="400" y1="380" x2="320" y2="310"/>
+    <line x1="72"  y1="280" x2="180" y2="268"/>
+    <line x1="140" y1="100" x2="210" y2="200"/>
+    <line x1="200" y1="440" x2="230" y2="320"/>
+  </g>
+
+  <!-- ====== NORTH STAR (4-pointed, Flutter parallelograms) ====== -->
+  <!-- Each arm is a Flutter-style parallelogram shape pointing outward -->
+
+  <g filter="url(#glow)">
+    <!-- Top arm -->
+    <path d="M256,180 L280,220 L256,100 L232,220 Z" fill="url(#armTop)" opacity="0.9"/>
+
+    <!-- Right arm -->
+    <path d="M292,256 L332,256 L412,232 L292,232 Z" fill="url(#armRight)" opacity="0.85"/>
+
+    <!-- Bottom arm -->
+    <path d="M256,292 L280,292 L256,412 L232,292 Z" fill="url(#armBottom)" opacity="0.9"/>
+
+    <!-- Left arm -->
+    <path d="M220,256 L180,256 L100,232 L220,232 Z" fill="url(#armLeft)" opacity="0.85"/>
+  </g>
+
+  <!-- Inner diamond where arms meet -->
+  <rect x="224" y="224" width="64" height="64" rx="4" fill="#6366F1" opacity="0.3" transform="rotate(45 256 256)"/>
+
+  <!-- Center beacon (the app origin point) -->
+  <circle cx="256" cy="256" r="24" fill="url(#centerGlow)"/>
+  <circle cx="256" cy="256" r="10" fill="#22D3EE" filter="url(#glow)"/>
+  <circle cx="256" cy="256" r="5" fill="#FFFFFF"/>
+
+  <!-- Tiny sparkle accents on star tips -->
+  <circle cx="256" cy="98"  r="4" fill="#22D3EE" opacity="0.8" filter="url(#glow)"/>
+  <circle cx="414" cy="244" r="3.5" fill="#A78BFA" opacity="0.7" filter="url(#glow)"/>
+  <circle cx="256" cy="414" r="4" fill="#22D3EE" opacity="0.8" filter="url(#glow)"/>
+  <circle cx="98"  cy="244" r="3.5" fill="#A78BFA" opacity="0.7" filter="url(#glow)"/>
+</svg>
