@@ -4,6 +4,15 @@ A CLI tool that scans Flutter projects for [Flutternaut](https://pub.dev/package
 
 ## Installation
 
+This package is **automatically included** when you add `flutternaut`:
+
+```yaml
+dependencies:
+  flutternaut: ^0.0.1
+```
+
+You can also use it standalone:
+
 ```bash
 dart pub global activate flutternaut_generator
 ```
@@ -20,14 +29,17 @@ dev_dependencies:
 Run from your Flutter project root:
 
 ```bash
+# If using flutternaut (recommended)
+dart run flutternaut
+
 # Global activation
 flutternaut_generator .
 
-# As a dev dependency
+# As a standalone dev dependency
 dart run flutternaut_generator
 
 # Custom output path
-dart run flutternaut_generator -o keys.json
+dart run flutternaut -o keys.json
 ```
 
 ## Configuration
@@ -35,9 +47,11 @@ dart run flutternaut_generator -o keys.json
 Configure the output path in your project's `pubspec.yaml`:
 
 ```yaml
-flutternaut_generator:
+flutternaut:
   output: lib/generated/flutternaut_keys.json
 ```
+
+The `flutternaut_generator:` config key is also supported for backwards compatibility.
 
 The `-o` CLI flag takes priority over the pubspec config. If neither is set, defaults to `flutternaut_keys.json` in the project root.
 
@@ -117,4 +131,4 @@ Index-like variables (`index`, `i`, `n`, `idx`, `position`, `pos`) are normalize
 
 ## Requirements
 
-- Dart >= 3.6.0
+- Dart >= 3.5.0

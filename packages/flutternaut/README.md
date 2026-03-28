@@ -109,10 +109,10 @@ Most elements don't need it — labels like `login_button` or `email_input` are 
 
 ## Key generation
 
-Run the [Flutternaut Generator](https://pub.dev/packages/flutternaut_generator) to extract all labels into a `flutternaut_keys.json` file:
+The [Flutternaut Generator](https://pub.dev/packages/flutternaut_generator) CLI is included automatically when you add `flutternaut`. Run it to extract all labels into a `flutternaut_keys.json` file:
 
 ```bash
-dart run flutternaut_generator
+dart run flutternaut
 ```
 
 This JSON is fed to the AI so it only targets real elements in your app.
@@ -130,6 +130,5 @@ This JSON is fed to the AI so it only targets real elements in your app.
 
 ## Requirements
 
-- Flutter >= 3.27.0
-- Dart >= 3.6.0
-- App must be built in **debug mode** — release mode strips the semantics tree
+- Flutter >= 3.24.0
+- Dart >= 3.5.0
