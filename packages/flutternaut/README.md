@@ -1,15 +1,24 @@
 # Flutternaut
 
-A concise Semantics wrapper for Flutter test automation with [Flutternaut AI](https://flutternaut.dev).
+A concise Semantics wrapper for Flutter test automation with [Flutternaut AI](https://flutternaut.app).
 
 Wrap your widgets with `Flutternaut` to make them discoverable by the Flutternaut test engine. Named constructors auto-configure the right semantics flags for common UI patterns.
 
 ## Installation
 
-```yaml
-dependencies:
-  flutternaut: ^0.0.1
+Add the package to your Flutter project:
+
+```bash
+flutter pub add flutternaut
 ```
+
+Install the generator CLI globally:
+
+```bash
+dart pub global activate flutternaut_generator
+```
+
+Then import it in your Dart code:
 
 ```dart
 import 'package:flutternaut/flutternaut.dart';
@@ -109,7 +118,7 @@ Most elements don't need it — labels like `login_button` or `email_input` are 
 
 ## Key generation
 
-The [Flutternaut Generator](https://pub.dev/packages/flutternaut_generator) CLI is included automatically when you add `flutternaut`. Run it to extract all labels into a `flutternaut_keys.json` file:
+Run the [Flutternaut Generator](https://pub.dev/packages/flutternaut_generator) to extract all labels into a `flutternaut_keys.json` file:
 
 ```bash
 dart run flutternaut
