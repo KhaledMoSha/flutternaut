@@ -1,3 +1,8 @@
+## 0.0.5
+
+* Document `@FlutternautView` annotation usage in README.
+* Fix stale semantics documentation — update constructors table and `excludeSemantics` behavior.
+
 ## 0.0.4
 
 * Add `@FlutternautView` annotation for grouping elements by view/screen.

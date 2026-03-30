@@ -90,16 +90,17 @@ Flutternaut(
 
 ## Constructors
 
-| Constructor | Semantics flags | Use for |
-|---|---|---|
-| `Flutternaut(...)` | Manual control | Drag targets, scroll containers, generic wrappers |
-| `Flutternaut.input(...)` | — | TextField, TextFormField |
-| `Flutternaut.button(...)` | `button: true` | ElevatedButton, IconButton, GestureDetector |
-| `Flutternaut.text(...)` | — | Counters, status labels, error messages |
-| `Flutternaut.item(...)` | `container: true` | ListTile, list items |
-| `Flutternaut.checkbox(...)` | `container: true`, `checked` | Checkbox, Switch |
+| Constructor | `container` | `excludeSemantics` | `button` | Use for |
+|---|---|---|---|---|
+| `Flutternaut(...)` | `true` | `false` | `false` | Drag targets, scroll containers, generic wrappers |
+| `Flutternaut.input(...)` | `false` | `true` | `false` | TextField, TextFormField |
+| `Flutternaut.button(...)` | `true` | `false` | `true` | ElevatedButton, IconButton, GestureDetector |
+| `Flutternaut.text(...)` | `false` | `true` | `false` | Counters, status labels, error messages |
+| `Flutternaut.item(...)` | `true` | `false` | `false` | ListTile, list items |
+| `Flutternaut.checkbox(...)` | `true` | `false` | `false` | Checkbox, Switch |
 
-All constructors set `excludeSemantics: true` to prevent child semantics from polluting accessibility IDs.
+- `excludeSemantics: true` (`.input`, `.text`) — gives the element a clean accessibility label by hiding child widget semantics.
+- `excludeSemantics: false` (`.button`, `.item`, `.checkbox`, default) — preserves child semantics so interactive actions (tap, check) propagate correctly.
 
 ## The `description` parameter
 
@@ -115,6 +116,44 @@ Flutternaut.text(
 ```
 
 Most elements don't need it — labels like `login_button` or `email_input` are self-explanatory. Use `description` for ambiguous labels where the AI might not understand the element's purpose.
+
+## View grouping with `@FlutternautView`
+
+Annotate your screen widgets with `@FlutternautView` to group elements by view in the generated keys file. This helps the AI understand which elements belong to which screen — when a user says "test the login view", the AI knows exactly which labels to use.
+
+```dart
+@FlutternautView('Login')
+class LoginScreen extends StatefulWidget {
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+```
+
+The annotation automatically propagates from a `StatefulWidget` to its `State` class — elements inside `_LoginScreenState` will have `"view": "Login"` in the keys file.
+
+For widgets in separate files that belong to the same view, repeat the annotation:
+
+```dart
+// In login_form.dart
+@FlutternautView('Login')
+class LoginForm extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Flutternaut.input(label: 'email_input', child: TextField());
+  }
+}
+```
+
+The generated keys file groups elements by view:
+
+```json
+{
+  "elements": [
+    {"label": "email_input", "type": "input", "view": "Login", "file": "lib/login_form.dart"},
+    {"label": "login_button", "type": "button", "view": "Login", "file": "lib/login_screen.dart"}
+  ]
+}
+```
 
 ## Key generation
 
@@ -135,7 +174,7 @@ This JSON is fed to the AI so it only targets real elements in your app.
 - `button` → `Semantics.button` — marks interactive controls
 - `container` → `Semantics.container` — marks semantic containers (list items)
 - `checked` → `Semantics.checked` — tracks checkbox/toggle state
-- `excludeSemantics: true` — always set, prevents child semantics from merging into the parent's accessibility ID
+- `excludeSemantics` — `true` for `.input`/`.text` (clean label), `false` for `.button`/`.item`/`.checkbox` (preserves child actions)
 
 ## Requirements
 
