@@ -43,6 +43,19 @@ class FlutternautAnalyzer {
   }
 }
 
+/// Returns the name of a [NamedType] as a String, compatible across
+/// analyzer 6.x through 9.x+.
+///
+/// analyzer <8: `name2` (Token), >=8: `name` (Token).
+String _namedTypeLexeme(NamedType type) {
+  try {
+    // ignore: deprecated_member_use
+    return (type as dynamic).name2.lexeme as String;
+  } catch (_) {
+    return (type as dynamic).name.lexeme as String;
+  }
+}
+
 class _FlutternautVisitor extends RecursiveAstVisitor<void> {
   final String filePath;
   final List<FlutternautElement> elements = [];
@@ -73,7 +86,7 @@ class _FlutternautVisitor extends RecursiveAstVisitor<void> {
   void visitInstanceCreationExpression(InstanceCreationExpression node) {
     // Handles `const Flutternaut(...)` and `new Flutternaut(...)`
     final constructorName = node.constructorName;
-    final typeName = constructorName.type.name.lexeme;
+    final typeName = _namedTypeLexeme(constructorName.type);
     final prefix = constructorName.type.importPrefix?.name.lexeme;
 
     if (typeName == 'Flutternaut') {
