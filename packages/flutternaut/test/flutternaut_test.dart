@@ -20,9 +20,9 @@ void main() {
 
       final semantics = tester.widget<Semantics>(find.byType(Semantics));
       expect(semantics.properties.label, 'test_label');
-      expect(semantics.excludeSemantics, true);
+      expect(semantics.excludeSemantics, false);
       expect(semantics.properties.button, false);
-      expect(semantics.container, false);
+      expect(semantics.container, true);
       expect(semantics.properties.checked, isNull);
       expect(semantics.properties.value, isNull);
     });
@@ -87,7 +87,8 @@ void main() {
       final semantics = tester.widget<Semantics>(find.byType(Semantics));
       expect(semantics.properties.label, 'login_button');
       expect(semantics.properties.button, true);
-      expect(semantics.container, false);
+      expect(semantics.container, true);
+      expect(semantics.excludeSemantics, false);
     });
   });
 

@@ -1,0 +1,173 @@
+{
+  "name": "Control Flow Actions",
+  "config": {
+    "timeout": "60s",
+    "retries": 0,
+    "failFast": true,
+    "screenshotOnFailure": true
+  },
+  "steps": [
+    {
+      "action": "wait_visible",
+      "target": "email_input",
+      "options": {
+        "timeout": "10s"
+      }
+    },
+    {
+      "action": "type",
+      "target": "email_input",
+      "value": "test@test.com"
+    },
+    {
+      "action": "type",
+      "target": "password_input",
+      "value": "password123"
+    },
+    {
+      "action": "tap",
+      "target": "login_button"
+    },
+    {
+      "action": "wait_visible",
+      "target": "todo_count",
+      "options": {
+        "timeout": "10s"
+      }
+    },
+    {
+      "action": "tap",
+      "target": "flow_button"
+    },
+    {
+      "action": "wait_visible",
+      "target": "counter_value",
+      "options": {
+        "timeout": "5s"
+      }
+    },
+    {
+      "_comment": "repeat_n_times - tap increment 3 times"
+    },
+    {
+      "action": "repeat_n_times",
+      "options": {
+        "count": 3
+      },
+      "steps": [
+        {
+          "action": "tap",
+          "target": "increment_button"
+        }
+      ]
+    },
+    {
+      "action": "expect_text",
+      "target": "counter_value",
+      "value": "3"
+    },
+    {
+      "_comment": "if - check conditional message visibility"
+    },
+    {
+      "action": "if",
+      "target": "conditional_message",
+      "options": {
+        "condition": "not_visible"
+      },
+      "steps": [
+        {
+          "action": "tap",
+          "target": "toggle_message_button"
+        }
+      ]
+    },
+    {
+      "action": "expect_visible",
+      "target": "conditional_message"
+    },
+    {
+      "action": "expect_text",
+      "target": "conditional_message",
+      "value": "Hello from conditional!"
+    },
+    {
+      "_comment": "repeat_until_visible - start timer and wait"
+    },
+    {
+      "action": "tap",
+      "target": "start_timer_button"
+    },
+    {
+      "action": "repeat_until_visible",
+      "target": "delayed_element",
+      "options": {
+        "delay": "1s",
+        "max_iterations": 5
+      },
+      "steps": [
+        {
+          "action": "expect_visible",
+          "target": "start_timer_button"
+        }
+      ]
+    },
+    {
+      "action": "expect_text",
+      "target": "delayed_element",
+      "value": "Appeared!"
+    },
+    {
+      "_comment": "iterate_over_list - verify all 5 items"
+    },
+    {
+      "action": "iterate_over_list",
+      "target": "flow_item_",
+      "steps": [
+        {
+          "action": "expect_visible",
+          "target": "flow_item_${index}"
+        }
+      ]
+    },
+    {
+      "_comment": "set_variable + if with var_equals"
+    },
+    {
+      "action": "set_variable",
+      "target": "my_var",
+      "value": "hello"
+    },
+    {
+      "action": "if",
+      "target": "my_var",
+      "value": "hello",
+      "options": {
+        "condition": "var_equals"
+      },
+      "steps": [
+        {
+          "action": "expect_visible",
+          "target": "counter_value"
+        }
+      ]
+    },
+    {
+      "_comment": "scroll_until_visible"
+    },
+    {
+      "action": "scroll_until_visible",
+      "target": "hidden_at_bottom",
+      "value": "up",
+      "options": {
+        "scroll_target": "flow_scroll_list",
+        "max_scrolls": 15
+      }
+    },
+    {
+      "action": "expect_text",
+      "target": "hidden_at_bottom",
+      "value": "Found me!"
+    }
+  ]
+}

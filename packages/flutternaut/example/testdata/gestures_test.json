@@ -1,0 +1,323 @@
+{
+  "name": "Gesture Interactions",
+  "config": {
+    "timeout": "60s",
+    "retries": 0,
+    "failFast": true,
+    "screenshotOnFailure": true,
+    "variables": null
+  },
+  "steps": [
+    {
+      "action": "wait_visible",
+      "_comment": null,
+      "target": "email_input",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "10s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "type",
+      "_comment": null,
+      "target": "email_input",
+      "value": "test@test.com",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "type",
+      "_comment": null,
+      "target": "password_input",
+      "value": "password123",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "tap",
+      "_comment": null,
+      "target": "login_button",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "wait_visible",
+      "_comment": null,
+      "target": "todo_count",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "10s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "tap",
+      "_comment": null,
+      "target": "gestures_button",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "wait_visible",
+      "_comment": null,
+      "target": "scroll_list",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "5s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": null,
+      "_comment": "Scroll test",
+      "target": null,
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "scroll",
+      "_comment": null,
+      "target": "scroll_list",
+      "value": "up",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "scroll_target": "scroll_list",
+        "amount": 0.5
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "expect_visible",
+      "_comment": null,
+      "target": "scroll_item_5",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": null,
+      "_comment": "Swipe to dismiss",
+      "target": null,
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "swipe",
+      "_comment": null,
+      "target": "swipe_item_0",
+      "value": "left",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "wait_text",
+      "_comment": null,
+      "target": "swipe_count",
+      "value": "2 items",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "3s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": null,
+      "_comment": "Long press",
+      "target": null,
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "long_press",
+      "_comment": null,
+      "target": "long_press_target",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "expect_text",
+      "_comment": null,
+      "target": "long_press_status",
+      "value": "Long pressed!",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": null,
+      "_comment": "Double tap",
+      "target": null,
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "double_tap",
+      "_comment": null,
+      "target": "double_tap_target",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "expect_text",
+      "_comment": null,
+      "target": "double_tap_count",
+      "value": "1",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "double_tap",
+      "_comment": null,
+      "target": "double_tap_target",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "expect_text",
+      "_comment": null,
+      "target": "double_tap_count",
+      "value": "2",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": null,
+      "_comment": "Drag and drop",
+      "target": null,
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "scroll",
+      "_comment": null,
+      "target": null,
+      "value": "up",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "drag_and_drop",
+      "_comment": null,
+      "target": "drag_source",
+      "value": "drag_target",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "expect_text",
+      "_comment": null,
+      "target": "drag_status",
+      "value": "Dropped!",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    }
+  ]
+}

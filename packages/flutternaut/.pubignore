@@ -1,0 +1,9 @@
+example/android/
+example/ios/
+example/build/
+example/.dart_tool/
+example/.metadata
+example/.gitignore
+example/*.iml
+example/.idea/
+example/pubspec.lock

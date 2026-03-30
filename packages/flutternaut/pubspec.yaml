@@ -12,7 +12,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutternaut_generator: ^0.0.1
+  flutternaut_generator: ^0.0.2
+  # flutternaut_generator:
+  #   path: ../flutternaut_generator
 
 dev_dependencies:
   flutter_test:

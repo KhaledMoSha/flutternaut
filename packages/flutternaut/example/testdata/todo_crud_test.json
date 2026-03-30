@@ -1,0 +1,114 @@
+{
+  "name": "Todo CRUD Operations",
+  "config": {
+    "timeout": "60s",
+    "retries": 0,
+    "failFast": true,
+    "screenshotOnFailure": true
+  },
+  "steps": [
+    {
+      "action": "wait_visible",
+      "target": "email_input",
+      "options": {
+        "timeout": "10s"
+      }
+    },
+    {
+      "action": "type",
+      "target": "email_input",
+      "value": "test@test.com"
+    },
+    {
+      "action": "type",
+      "target": "password_input",
+      "value": "password123"
+    },
+    {
+      "action": "tap",
+      "target": "login_button"
+    },
+    {
+      "action": "wait_text",
+      "target": "todo_count",
+      "value": "2 items",
+      "options": {
+        "timeout": "10s"
+      }
+    },
+    {
+      "_comment": "Add a new todo"
+    },
+    {
+      "action": "type",
+      "target": "todo_input",
+      "value": "Walk the dog"
+    },
+    {
+      "action": "tap",
+      "target": "add_button"
+    },
+    {
+      "action": "wait_text",
+      "target": "todo_count",
+      "value": "3 items",
+      "options": {
+        "timeout": "5s"
+      }
+    },
+    {
+      "action": "expect_contains",
+      "target": "todo_text_2",
+      "value": "Walk the dog"
+    },
+    {
+      "_comment": "Find 'Read a book' and delete it"
+    },
+    {
+      "action": "find_in_list",
+      "target": "todo_text_",
+      "value": "Read a book",
+      "steps": [
+        {
+          "action": "tap",
+          "target": "delete_${index}"
+        }
+      ]
+    },
+    {
+      "action": "wait_text",
+      "target": "todo_count",
+      "value": "2 items",
+      "options": {
+        "timeout": "5s"
+      }
+    },
+    {
+      "_comment": "Toggle first item checkbox"
+    },
+    {
+      "action": "tap",
+      "target": "check_0"
+    },
+    {
+      "_comment": "Clear input and add another"
+    },
+    {
+      "action": "type",
+      "target": "todo_input",
+      "value": "Clean house"
+    },
+    {
+      "action": "tap",
+      "target": "add_button"
+    },
+    {
+      "action": "wait_text",
+      "target": "todo_count",
+      "value": "3 items",
+      "options": {
+        "timeout": "5s"
+      }
+    }
+  ]
+}

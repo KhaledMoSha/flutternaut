@@ -1,0 +1,149 @@
+{
+  "name": "System Control Test",
+  "config": {
+    "timeout": "90s",
+    "retries": 0,
+    "failFast": true,
+    "screenshotOnFailure": true
+  },
+  "steps": [
+    {
+      "_comment": "=== Wait for initial app launch ==="
+    },
+    {
+      "action": "wait_visible",
+      "target": "email_input",
+      "timeout": "15s"
+    },
+    {
+      "_comment": "=== Login first ==="
+    },
+    {
+      "action": "type",
+      "target": "email_input",
+      "value": "test@test.com"
+    },
+    {
+      "action": "type",
+      "target": "password_input",
+      "value": "password123"
+    },
+    {
+      "action": "tap",
+      "target": "login_button"
+    },
+    {
+      "action": "wait_text",
+      "target": "todo_count",
+      "value": "2 items",
+      "timeout": "10s"
+    },
+    {
+      "_comment": "=== Test background_app + resume_app ==="
+    },
+    {
+      "action": "background_app"
+    },
+    {
+      "action": "resume_app"
+    },
+    {
+      "action": "wait_visible",
+      "target": "todo_count",
+      "timeout": "10s"
+    },
+    {
+      "action": "expect_text",
+      "target": "todo_count",
+      "value": "2 items"
+    },
+    {
+      "_comment": "=== Test close_app (soft) + open_app (foreground) ==="
+    },
+    {
+      "action": "close_app"
+    },
+    {
+      "action": "open_app"
+    },
+    {
+      "action": "wait_visible",
+      "target": "todo_count",
+      "timeout": "10s"
+    },
+    {
+      "action": "expect_text",
+      "target": "todo_count",
+      "value": "2 items"
+    },
+    {
+      "_comment": "=== Test restart_app (soft) — bg + activate ==="
+    },
+    {
+      "action": "restart_app",
+      "options": {
+        "mode": "soft"
+      }
+    },
+    {
+      "action": "wait_visible",
+      "target": "todo_count",
+      "timeout": "10s"
+    },
+    {
+      "action": "expect_text",
+      "target": "todo_count",
+      "value": "2 items"
+    },
+    {
+      "_comment": "=== Test background_app with timed auto-resume (2 seconds) ==="
+    },
+    {
+      "action": "background_app",
+      "options": {
+        "seconds": 2
+      }
+    },
+    {
+      "action": "wait_visible",
+      "target": "todo_count",
+      "timeout": "10s"
+    },
+    {
+      "action": "expect_text",
+      "target": "todo_count",
+      "value": "2 items"
+    },
+    {
+      "_comment": "=== Test restart_app (hard) — terminate + relaunch ==="
+    },
+    {
+      "action": "restart_app"
+    },
+    {
+      "action": "wait_visible",
+      "target": "email_input",
+      "timeout": "15s"
+    },
+    {
+      "_comment": "=== Test close_app (hard) + open_app (hard) ==="
+    },
+    {
+      "action": "close_app",
+      "options": {
+        "mode": "hard"
+      }
+    },
+    {
+      "action": "open_app",
+      "options": {
+        "mode": "hard"
+      }
+    },
+    {
+      "action": "wait_visible",
+      "target": "email_input",
+      "timeout": "15s"
+    }
+  ]
+}

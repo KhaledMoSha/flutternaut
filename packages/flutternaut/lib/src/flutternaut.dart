@@ -2,16 +2,17 @@ import 'package:flutter/widgets.dart';
 
 /// A wrapper widget that configures [Semantics] for Flutternaut test automation.
 ///
-/// Replaces verbose `Semantics(label: ..., excludeSemantics: true, ...)` calls
-/// with a concise API. Always sets `excludeSemantics: true` to prevent child
-/// semantics from polluting accessibility IDs.
+/// Replaces verbose `Semantics(label: ..., container: true, ...)` calls
+/// with a concise API. Preserves child semantics by default so interactive
+/// widgets (buttons, inputs, checkboxes) keep their actions. Only
+/// [Flutternaut.text] sets `excludeSemantics: true` for a clean label.
 ///
 /// Use named constructors for common patterns:
 /// - [Flutternaut.input] — text fields
-/// - [Flutternaut.button] — buttons and interactive controls
-/// - [Flutternaut.text] — dynamic text displays
-/// - [Flutternaut.item] — list items (sets container: true)
-/// - [Flutternaut.checkbox] — checkable items (sets container + checked)
+/// - [Flutternaut.button] — buttons and interactive controls (container: true)
+/// - [Flutternaut.text] — dynamic text displays (excludes child semantics)
+/// - [Flutternaut.item] — list items (container: true)
+/// - [Flutternaut.checkbox] — checkable items (container: true + checked)
 ///
 /// The optional [description] parameter provides additional context for the
 /// Flutternaut key generator and AI test authoring. It is **not** passed to
@@ -50,6 +51,9 @@ class Flutternaut extends StatelessWidget {
   /// Whether this element is a semantic container (e.g. list item).
   final bool container;
 
+  /// Whether to exclude child semantics from the tree.
+  final bool excludeSemantics;
+
   /// Whether this element is checked (for checkboxes/toggles).
   final bool? checked;
 
@@ -66,7 +70,8 @@ class Flutternaut extends StatelessWidget {
     this.value,
     this.description,
     this.button = false,
-    this.container = false,
+    this.container = true,
+    this.excludeSemantics = false,
     this.checked,
     required this.child,
   });
@@ -80,11 +85,16 @@ class Flutternaut extends StatelessWidget {
   })  : value = null,
         button = false,
         container = false,
+        excludeSemantics = true,
         checked = null;
 
   /// For interactive controls (ElevatedButton, IconButton, GestureDetector).
   ///
-  /// Auto-sets `button: true` in semantics.
+  /// Auto-sets `button: true` and `container: true`. Preserves child semantics
+  /// so the button's `onTap` action propagates — keeping the node clickable.
+  ///
+  /// The direct child must be the button widget itself. Do not wrap it in
+  /// extra containers or padding — this breaks clickability propagation.
   const Flutternaut.button({
     super.key,
     required this.label,
@@ -92,7 +102,8 @@ class Flutternaut extends StatelessWidget {
     required this.child,
   })  : value = null,
         button = true,
-        container = false,
+        container = true,
+        excludeSemantics = false,
         checked = null;
 
   /// For dynamic text displays (counters, status labels, error messages).
@@ -106,6 +117,7 @@ class Flutternaut extends StatelessWidget {
     required this.child,
   })  : button = false,
         container = false,
+        excludeSemantics = true,
         checked = null;
 
   /// For list items inside ListView/ListTile.
@@ -119,6 +131,7 @@ class Flutternaut extends StatelessWidget {
     required this.child,
   })  : button = false,
         container = true,
+        excludeSemantics = false,
         checked = null;
 
   /// For checkable items (Checkbox, Switch).
@@ -132,7 +145,8 @@ class Flutternaut extends StatelessWidget {
     required this.child,
   })  : value = null,
         button = false,
-        container = true;
+        container = true,
+        excludeSemantics = false;
 
   @override
   Widget build(BuildContext context) {
@@ -142,7 +156,7 @@ class Flutternaut extends StatelessWidget {
       button: button,
       container: container,
       checked: checked,
-      excludeSemantics: true,
+      excludeSemantics: excludeSemantics,
       child: child,
     );
   }

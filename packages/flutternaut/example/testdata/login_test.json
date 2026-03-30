@@ -1,0 +1,176 @@
+{
+  "name": "Login Validation and Success",
+  "config": {
+    "timeout": "60s",
+    "retries": 0,
+    "failFast": true,
+    "screenshotOnFailure": true,
+    "variables": null
+  },
+  "steps": [
+    {
+      "action": "wait_visible",
+      "_comment": null,
+      "target": "email_input",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "10s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "type",
+      "_comment": null,
+      "target": "email_input",
+      "value": "test@test.com",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "type",
+      "_comment": null,
+      "target": "password_input",
+      "value": "password123",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "tap",
+      "_comment": null,
+      "target": "login_button",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "wait_not_visible",
+      "_comment": null,
+      "target": "loading_indicator",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "5s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "wait_text",
+      "_comment": null,
+      "target": "todo_count",
+      "value": "2 items",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "10s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "tap",
+      "_comment": null,
+      "target": "logout_button",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "wait_visible",
+      "_comment": null,
+      "target": "email_input",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": {
+        "timeout": "5s"
+      },
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": null,
+      "_comment": "Test empty email validation",
+      "target": null,
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "clear",
+      "_comment": null,
+      "target": "email_input",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "clear",
+      "_comment": null,
+      "target": "password_input",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "tap",
+      "_comment": null,
+      "target": "login_button",
+      "value": null,
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    },
+    {
+      "action": "expect_text",
+      "_comment": null,
+      "target": "error_text",
+      "value": "Email is required",
+      "timeout": null,
+      "retries": null,
+      "strategy": null,
+      "options": null,
+      "steps": null,
+      "elseSteps": null
+    }
+  ]
+}

@@ -1,0 +1,293 @@
+{
+  "generated_at": "2026-03-30T22:56:29.374364Z",
+  "package": "flutternaut_example",
+  "elements": [
+    {
+      "label": "counter_value",
+      "type": "text",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "increment_button",
+      "type": "button",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "toggle_message_button",
+      "type": "button",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "conditional_message",
+      "type": "text",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "start_timer_button",
+      "type": "button",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "delayed_element",
+      "type": "text",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "flow_item_count",
+      "type": "text",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "flow_item_{index}",
+      "type": "text",
+      "dynamic": true,
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "flow_scroll_list",
+      "type": "item",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "hidden_at_bottom",
+      "type": "text",
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "scroll_item_{index}",
+      "type": "text",
+      "dynamic": true,
+      "view": "ControlFlow",
+      "description": null,
+      "file": "lib/screens/control_flow_screen.dart"
+    },
+    {
+      "label": "orientation_status",
+      "type": "text",
+      "view": "Device",
+      "description": null,
+      "file": "lib/screens/device_screen.dart"
+    },
+    {
+      "label": "loading_indicator",
+      "type": "item",
+      "view": "Login",
+      "description": null,
+      "file": "lib/screens/login_screen.dart"
+    },
+    {
+      "label": "email_input",
+      "type": "input",
+      "view": "Login",
+      "description": null,
+      "file": "lib/screens/login_screen.dart"
+    },
+    {
+      "label": "password_input",
+      "type": "input",
+      "view": "Login",
+      "description": null,
+      "file": "lib/screens/login_screen.dart"
+    },
+    {
+      "label": "login_button",
+      "type": "button",
+      "view": "Login",
+      "description": null,
+      "file": "lib/screens/login_screen.dart"
+    },
+    {
+      "label": "error_text",
+      "type": "text",
+      "view": "Login",
+      "description": null,
+      "file": "lib/screens/login_screen.dart"
+    },
+    {
+      "label": "scroll_result",
+      "type": "text",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "scroll_list",
+      "type": "item",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "scroll_item_{index}",
+      "type": "text",
+      "dynamic": true,
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "swipe_count",
+      "type": "text",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "swipe_item_{index}",
+      "type": "text",
+      "dynamic": true,
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "long_press_status",
+      "type": "text",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "long_press_target",
+      "type": "button",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "double_tap_count",
+      "type": "text",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "double_tap_target",
+      "type": "button",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "drag_test",
+      "type": "item",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "drag_status",
+      "type": "text",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "drag_source",
+      "type": "item",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "drag_target",
+      "type": "element",
+      "view": "Gestures",
+      "description": null,
+      "file": "lib/screens/gestures_screen.dart"
+    },
+    {
+      "label": "gestures_button",
+      "type": "button",
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "device_button",
+      "type": "button",
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "flow_button",
+      "type": "button",
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "logout_button",
+      "type": "button",
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "todo_input",
+      "type": "input",
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "add_button",
+      "type": "button",
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "todo_count",
+      "type": "text",
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "check_{index}",
+      "type": "checkbox",
+      "dynamic": true,
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "todo_text_{index}",
+      "type": "item",
+      "dynamic": true,
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    },
+    {
+      "label": "delete_{index}",
+      "type": "item",
+      "dynamic": true,
+      "view": "Home",
+      "description": null,
+      "file": "lib/screens/home_screen.dart"
+    }
+  ]
+}
