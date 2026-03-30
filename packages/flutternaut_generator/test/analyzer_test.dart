@@ -59,7 +59,7 @@ Flutternaut.button(
           _wrap(r"Flutternaut.item(label: 'todo_item_$index', child: Text('item'))");
       final elements = analyzer.analyzeSource(source, 'lib/todo.dart');
       expect(elements.first.isDynamic, true);
-      expect(elements.first.label, 'todo_item_{n}');
+      expect(elements.first.label, 'todo_item_{index}');
     });
 
     test(r'detects dynamic labels with ${expr}', () {
@@ -67,7 +67,7 @@ Flutternaut.button(
           r"Flutternaut.item(label: 'row_${items.indexOf(item)}', child: Text('row'))");
       final elements = analyzer.analyzeSource(source, 'lib/list.dart');
       expect(elements.first.isDynamic, true);
-      expect(elements.first.label, 'row_{n}');
+      expect(elements.first.label, 'row_{index}');
     });
 
     test('rewrites named variables in interpolation', () {
@@ -144,6 +144,87 @@ Column(children: [
     });
   });
 
+  group('view annotation', () {
+    test('@FlutternautView sets view on elements', () {
+      const source = '''
+@FlutternautView('Login')
+class LoginScreen extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Flutternaut.button(label: 'login_button', child: Container());
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/login.dart');
+      expect(elements, hasLength(1));
+      expect(elements.first.view, 'Login');
+    });
+
+    test('@FlutternautView on StatefulWidget propagates to State class', () {
+      const source = '''
+@FlutternautView('Login')
+class LoginScreen extends StatefulWidget {
+  const LoginScreen({super.key});
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  Widget build(BuildContext context) {
+    return Flutternaut.input(label: 'email_input', child: TextField());
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/login.dart');
+      expect(elements, hasLength(1));
+      expect(elements.first.label, 'email_input');
+      expect(elements.first.view, 'Login');
+    });
+
+    test('elements without annotation have null view', () {
+      const source = '''
+class HomeScreen extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Flutternaut.button(label: 'home_button', child: Container());
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/home.dart');
+      expect(elements.first.view, isNull);
+    });
+
+    test('two classes with different views in same file', () {
+      const source = '''
+@FlutternautView('Login')
+class LoginScreen extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Flutternaut.input(label: 'email_input', child: TextField());
+  }
+}
+
+@FlutternautView('Profile')
+class ProfileScreen extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Flutternaut.text(label: 'username', child: Text(''));
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/screens.dart');
+      expect(elements, hasLength(2));
+      expect(elements[0].view, 'Login');
+      expect(elements[1].view, 'Profile');
+    });
+
+    test('view field included in JSON only when non-null', () {
+      const withView = FlutternautElement(
+          label: 'btn', type: 'button', view: 'Login', file: 'lib/a.dart');
+      expect(withView.toJson()['view'], 'Login');
+
+      const withoutView = FlutternautElement(
+          label: 'btn', type: 'button', file: 'lib/a.dart');
+      expect(withoutView.toJson().containsKey('view'), false);
+    });
+  });
+
   group('models', () {
     test('FlutternautElement.toJson includes dynamic field only when true',
         () {
@@ -152,7 +233,7 @@ Column(children: [
       expect(staticEl.toJson().containsKey('dynamic'), false);
 
       const dynamicEl = FlutternautElement(
-          label: 'item_{n}',
+          label: 'item_{index}',
           type: 'item',
           isDynamic: true,
           file: 'lib/a.dart');

@@ -59,8 +59,67 @@ String _namedTypeLexeme(NamedType type) {
 class _FlutternautVisitor extends RecursiveAstVisitor<void> {
   final String filePath;
   final List<FlutternautElement> elements = [];
+  String? _currentView;
+
+  /// Maps StatefulWidget class names to their @FlutternautView value.
+  /// Populated on first visit so State<X> classes can inherit the view.
+  final Map<String, String> _widgetViews = {};
 
   _FlutternautVisitor(this.filePath);
+
+  /// Extracts the @FlutternautView annotation value from a class, if present.
+  String? _extractViewAnnotation(ClassDeclaration node) {
+    for (final annotation in node.metadata) {
+      final name = annotation.name.name;
+      if (name == 'FlutternautView') {
+        final args = annotation.arguments;
+        if (args != null && args.arguments.isNotEmpty) {
+          final arg = args.arguments.first;
+          if (arg is SimpleStringLiteral) {
+            return arg.value;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  @override
+  void visitClassDeclaration(ClassDeclaration node) {
+    final prevView = _currentView;
+
+    // Check for @FlutternautView on this class.
+    final annotatedView = _extractViewAnnotation(node);
+    if (annotatedView != null) {
+      _currentView = annotatedView;
+      // Store so State<ClassName> can inherit it.
+      _widgetViews[node.name.lexeme] = annotatedView;
+    }
+
+    // If this is a State<X> class, inherit the view from the StatefulWidget X.
+    if (_currentView == null) {
+      final superclass = node.extendsClause?.superclass;
+      if (superclass != null) {
+        final superName = _namedTypeLexeme(superclass);
+        if (superName == 'State') {
+          final typeArgs = superclass.typeArguments?.arguments;
+          if (typeArgs != null && typeArgs.isNotEmpty) {
+            final widgetType = typeArgs.first;
+            if (widgetType is NamedType) {
+              final widgetName = _namedTypeLexeme(widgetType);
+              final inherited = _widgetViews[widgetName];
+              if (inherited != null) {
+                _currentView = inherited;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    super.visitClassDeclaration(node);
+    _currentView = prevView;
+  }
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
@@ -135,13 +194,14 @@ class _FlutternautVisitor extends RecursiveAstVisitor<void> {
       type: type,
       description: description,
       isDynamic: isDynamic,
+      view: _currentView,
       file: filePath,
     ));
   }
 
   /// Rewrites a `StringInterpolation` into a placeholder pattern.
   ///
-  /// e.g. `"todo_$index"` → `"todo_{n}"`
+  /// e.g. `"todo_$index"` → `"todo_{index}"`
   ///      `"item_${name}_btn"` → `"item_{name}_btn"`
   String _rewriteInterpolation(StringInterpolation node) {
     final buffer = StringBuffer();
@@ -154,13 +214,13 @@ class _FlutternautVisitor extends RecursiveAstVisitor<void> {
         if (expr is SimpleIdentifier) {
           final name = expr.name;
           if (_isIndexLike(name)) {
-            buffer.write('{n}');
+            buffer.write('{index}');
           } else {
             buffer.write('{$name}');
           }
         } else {
-          // Complex expressions like ${items.length} → {n}
-          buffer.write('{n}');
+          // Complex expressions like ${items.length} → {index}
+          buffer.write('{index}');
         }
       }
     }

@@ -14,6 +14,9 @@ class FlutternautElement {
   /// Whether the label contains string interpolation (e.g. "todo_$index").
   final bool isDynamic;
 
+  /// The view/screen this element belongs to (from @FlutternautView annotation).
+  final String? view;
+
   /// The relative file path where this element was found.
   final String file;
 
@@ -22,6 +25,7 @@ class FlutternautElement {
     required this.type,
     this.description,
     this.isDynamic = false,
+    this.view,
     required this.file,
   });
 
@@ -32,6 +36,9 @@ class FlutternautElement {
     };
     if (isDynamic) {
       map['dynamic'] = true;
+    }
+    if (view != null) {
+      map['view'] = view;
     }
     map['description'] = description;
     map['file'] = file;
