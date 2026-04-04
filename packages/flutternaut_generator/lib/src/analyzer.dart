@@ -17,16 +17,31 @@ class FlutternautAnalyzer {
     final libDir = Directory(p.join(rootPath, 'lib'));
     if (!libDir.existsSync()) return [];
 
-    final elements = <FlutternautElement>[];
     final dartFiles = libDir
         .listSync(recursive: true)
         .whereType<File>()
-        .where((f) => f.path.endsWith('.dart'));
+        .where((f) => f.path.endsWith('.dart'))
+        .toList();
 
+    // Pass 1: Parse all files and collect static const string declarations.
+    final constMap = <String, String>{};
+    final parsedFiles = <File, CompilationUnit>{};
+    for (final file in dartFiles) {
+      final source = file.readAsStringSync();
+      final result = parseString(content: source, throwIfDiagnostics: false);
+      parsedFiles[file] = result.unit;
+      final collector = _ConstStringCollector();
+      result.unit.accept(collector);
+      constMap.addAll(collector.constants);
+    }
+
+    // Pass 2: Analyze with const resolution.
+    final elements = <FlutternautElement>[];
     for (final file in dartFiles) {
       final relativePath = p.relative(file.path, from: rootPath);
-      final source = file.readAsStringSync();
-      elements.addAll(analyzeSource(source, relativePath));
+      final visitor = _FlutternautVisitor(relativePath, constMap: constMap);
+      parsedFiles[file]!.accept(visitor);
+      elements.addAll(visitor.elements);
     }
 
     return elements;
@@ -35,9 +50,12 @@ class FlutternautAnalyzer {
   /// Analyzes a single Dart source string and returns any elements found.
   ///
   /// [filePath] is stored on each element for traceability.
-  List<FlutternautElement> analyzeSource(String source, String filePath) {
+  /// [constMap] provides pre-collected const string values for resolving
+  /// non-literal annotation arguments (e.g. `AppRoutes.trip` → `'/tripView'`).
+  List<FlutternautElement> analyzeSource(String source, String filePath,
+      {Map<String, String> constMap = const {}}) {
     final result = parseString(content: source, throwIfDiagnostics: false);
-    final visitor = _FlutternautVisitor(filePath);
+    final visitor = _FlutternautVisitor(filePath, constMap: constMap);
     result.unit.accept(visitor);
     return visitor.elements;
   }
@@ -56,8 +74,50 @@ String _namedTypeLexeme(NamedType type) {
   }
 }
 
+/// Collects static const String fields and top-level const strings.
+///
+/// Result map keys use `"ClassName.fieldName"` for class members and
+/// bare `"variableName"` for top-level declarations.
+class _ConstStringCollector extends RecursiveAstVisitor<void> {
+  final Map<String, String> constants = {};
+
+  @override
+  void visitClassDeclaration(ClassDeclaration node) {
+    final className = node.name.lexeme;
+    for (final member in node.members) {
+      if (member is FieldDeclaration && member.isStatic) {
+        final vars = member.fields;
+        if (vars.isConst) {
+          for (final variable in vars.variables) {
+            final init = variable.initializer;
+            if (init is SimpleStringLiteral) {
+              constants['$className.${variable.name.lexeme}'] = init.value;
+            }
+          }
+        }
+      }
+    }
+    super.visitClassDeclaration(node);
+  }
+
+  @override
+  void visitTopLevelVariableDeclaration(TopLevelVariableDeclaration node) {
+    final vars = node.variables;
+    if (vars.isConst) {
+      for (final variable in vars.variables) {
+        final init = variable.initializer;
+        if (init is SimpleStringLiteral) {
+          constants[variable.name.lexeme] = init.value;
+        }
+      }
+    }
+    super.visitTopLevelVariableDeclaration(node);
+  }
+}
+
 class _FlutternautVisitor extends RecursiveAstVisitor<void> {
   final String filePath;
+  final Map<String, String> constMap;
   final List<FlutternautElement> elements = [];
   String? _currentView;
 
@@ -65,7 +125,7 @@ class _FlutternautVisitor extends RecursiveAstVisitor<void> {
   /// Populated on first visit so State<X> classes can inherit the view.
   final Map<String, String> _widgetViews = {};
 
-  _FlutternautVisitor(this.filePath);
+  _FlutternautVisitor(this.filePath, {this.constMap = const {}});
 
   /// Extracts the @FlutternautView annotation value from a class, if present.
   String? _extractViewAnnotation(ClassDeclaration node) {
@@ -78,6 +138,13 @@ class _FlutternautVisitor extends RecursiveAstVisitor<void> {
           if (arg is SimpleStringLiteral) {
             return arg.value;
           }
+          // Try resolving const reference via the collected map.
+          final source = arg.toSource();
+          if (constMap.containsKey(source)) {
+            return constMap[source];
+          }
+          // Fallback: use source text as-is.
+          return source;
         }
       }
     }

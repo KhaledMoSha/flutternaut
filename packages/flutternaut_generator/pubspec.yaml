@@ -1,6 +1,6 @@
 name: flutternaut_generator
 description: "CLI tool that scans Flutter projects for Flutternaut widgets and extracts labels into a structured JSON file for AI test authoring."
-version: 0.0.2
+version: 0.0.3
 homepage: https://flutternaut.app
 repository: https://github.com/KhaledMoSha/flutternaut
 resolution: workspace

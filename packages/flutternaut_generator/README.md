@@ -61,7 +61,8 @@ The `-o` CLI flag takes priority over the pubspec config. If neither is set, def
 2. Finds all `Flutternaut` widget usages (ignores raw `Semantics`)
 3. Extracts: `label`, `description`, constructor type, source file path
 4. Detects dynamic labels (e.g. `"todo_$index"`) and rewrites them as patterns (`"todo_{n}"`)
-5. Outputs `flutternaut_keys.json`
+5. Resolves `@FlutternautView` arguments — supports string literals (`'Login'`) and static const references (`AppRoutes.trip`)
+6. Outputs `flutternaut_keys.json`
 
 ## Output format
 

@@ -223,6 +223,70 @@ class ProfileScreen extends StatelessWidget {
           label: 'btn', type: 'button', file: 'lib/a.dart');
       expect(withoutView.toJson().containsKey('view'), false);
     });
+
+    test('@FlutternautView with static const reference resolves value', () {
+      const source = '''
+@FlutternautView(AppRoutes.trip)
+class TripScreen extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Flutternaut.button(label: 'trip_btn', child: Container());
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/trip.dart',
+          constMap: {'AppRoutes.trip': '/tripView'});
+      expect(elements, hasLength(1));
+      expect(elements.first.view, '/tripView');
+    });
+
+    test('@FlutternautView with top-level const resolves value', () {
+      const source = '''
+@FlutternautView(tripRoute)
+class TripScreen extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Flutternaut.button(label: 'trip_btn', child: Container());
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/trip.dart',
+          constMap: {'tripRoute': '/tripView'});
+      expect(elements, hasLength(1));
+      expect(elements.first.view, '/tripView');
+    });
+
+    test('@FlutternautView with unknown reference falls back to source text',
+        () {
+      const source = '''
+@FlutternautView(UnknownRoutes.trip)
+class TripScreen extends StatelessWidget {
+  Widget build(BuildContext context) {
+    return Flutternaut.button(label: 'trip_btn', child: Container());
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/trip.dart');
+      expect(elements, hasLength(1));
+      expect(elements.first.view, 'UnknownRoutes.trip');
+    });
+
+    test('@FlutternautView const ref propagates to State class', () {
+      const source = '''
+@FlutternautView(AppRoutes.login)
+class LoginScreen extends StatefulWidget {
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+class _LoginScreenState extends State<LoginScreen> {
+  Widget build(BuildContext context) {
+    return Flutternaut.input(label: 'email', child: TextField());
+  }
+}
+''';
+      final elements = analyzer.analyzeSource(source, 'lib/login.dart',
+          constMap: {'AppRoutes.login': '/loginView'});
+      expect(elements, hasLength(1));
+      expect(elements.first.view, '/loginView');
+    });
   });
 
   group('models', () {

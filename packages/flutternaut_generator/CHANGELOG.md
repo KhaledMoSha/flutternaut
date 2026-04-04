@@ -1,3 +1,9 @@
+## 0.0.3
+
+* Resolve `@FlutternautView` arguments that use static const references (e.g. `AppRoutes.trip`).
+* Two-pass analysis: first collects all `static const` string declarations across the project, then resolves annotation arguments against them.
+* Falls back to source text when a const reference cannot be resolved.
+
 ## 0.0.2
 
 * Fix compatibility with analyzer 7.x+ (`NamedType.name` → `name2` rename cycle).
