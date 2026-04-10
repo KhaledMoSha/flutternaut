@@ -1,5 +1,8 @@
 # Flutternaut
 
+[![pub package](https://img.shields.io/pub/v/flutternaut.svg)](https://pub.dev/packages/flutternaut)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A concise Semantics wrapper for Flutter test automation with [Flutternaut AI](https://flutternaut.app).
 
 Wrap your widgets with `Flutternaut` to make them discoverable by the Flutternaut test engine. Named constructors auto-configure the right semantics flags for common UI patterns.

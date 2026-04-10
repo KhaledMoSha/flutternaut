@@ -1,5 +1,8 @@
 # Flutternaut Generator
 
+[![pub package](https://img.shields.io/pub/v/flutternaut_generator.svg)](https://pub.dev/packages/flutternaut_generator)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A CLI tool that scans Flutter projects for [Flutternaut](https://pub.dev/packages/flutternaut) widgets and extracts all labels into a structured JSON file. This JSON powers AI-driven test authoring by telling the AI exactly which elements exist in your app.
 
 ## Installation

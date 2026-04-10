@@ -1,6 +1,10 @@
 /// Annotation that groups all [Flutternaut] widgets inside this class
 /// under a named view in the generated keys file.
 ///
+/// This annotation is **optional** — Flutternaut widgets work without it.
+/// It is only read by the generator at build time and has **no runtime
+/// effect**. Adding or removing it does not change your app's behavior.
+///
 /// The generator scans for this annotation on widget classes and sets the
 /// `view` field on all elements found within. The AI prompt then groups
 /// labels by view so users can say "test the login view" and the AI knows
