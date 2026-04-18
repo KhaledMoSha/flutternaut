@@ -1,6 +1,6 @@
-import '../main_thread_runner.dart';
+import '../engine/main_thread_runner.dart';
+import '../engine/tree_walker.dart';
 import '../router.dart';
-import '../tree_walker.dart';
 
 /// Handles health check and tree inspection endpoints.
 class HealthHandler {

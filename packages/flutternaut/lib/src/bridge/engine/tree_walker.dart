@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'models/element_info.dart';
-import 'models/element_rect.dart';
-import 'models/visibility_result.dart';
+import '../models/element_info.dart';
+import '../models/element_rect.dart';
+import '../models/visibility_result.dart';
 
 /// Walks the Flutter element tree to find widgets by [ValueKey] or text,
 /// read their properties, check visibility, and dump the tree structure.
@@ -35,10 +35,13 @@ class TreeWalker {
   ElementInfo? findByTextContains(String substring) {
     return _findWhere((element) {
       final widget = element.widget;
-      if (widget is Text && widget.data != null && widget.data!.contains(substring)) {
+      if (widget is Text &&
+          widget.data != null &&
+          widget.data!.contains(substring)) {
         return true;
       }
-      if (widget is EditableText && widget.controller.text.contains(substring)) {
+      if (widget is EditableText &&
+          widget.controller.text.contains(substring)) {
         return true;
       }
       return false;

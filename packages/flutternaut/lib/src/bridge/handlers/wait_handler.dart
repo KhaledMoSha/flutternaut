@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/scheduler.dart';
 
-import '../main_thread_runner.dart';
+import '../engine/main_thread_runner.dart';
+import '../engine/tree_walker.dart';
 import '../models/wait_result.dart';
 import '../router.dart';
-import '../tree_walker.dart';
 import '_locator.dart';
 
 /// Handles wait/poll endpoints.
@@ -79,10 +79,11 @@ class WaitHandler {
     final sw = Stopwatch()..start();
     while (sw.elapsedMilliseconds < timeoutMs) {
       final met = await _runner.run(check);
-      if (met) return WaitResult(success: true, elapsedMs: sw.elapsedMilliseconds);
+      if (met) {
+        return WaitResult(success: true, elapsedMs: sw.elapsedMilliseconds);
+      }
       await Future<void>.delayed(Duration(milliseconds: intervalMs));
     }
     return WaitResult(success: false, elapsedMs: sw.elapsedMilliseconds);
   }
-
 }

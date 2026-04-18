@@ -2,11 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
-import 'gesture_dispatcher.dart';
+import 'engine/gesture_dispatcher.dart';
+import 'engine/main_thread_runner.dart';
+import 'engine/tree_walker.dart';
 import 'handlers/handlers.dart';
-import 'main_thread_runner.dart';
 import 'router.dart';
-import 'tree_walker.dart';
 
 /// HTTP server that runs inside a Flutter app and exposes the widget tree
 /// and gesture dispatch to external test engines.
@@ -34,12 +34,12 @@ class BridgeServer {
     TreeWalker? walker,
     MainThreadRunner? runner,
     void Function(String)? log,
-  }) : _log = log ?? debugPrint,
-       _router = _buildBridgeRouter(
-         walker: walker ?? TreeWalker(),
-         runner: runner ?? MainThreadRunner(),
-         log: log ?? debugPrint,
-       );
+  })  : _log = log ?? debugPrint,
+        _router = _buildBridgeRouter(
+          walker: walker ?? TreeWalker(),
+          runner: runner ?? MainThreadRunner(),
+          log: log ?? debugPrint,
+        );
 
   /// Whether the server is currently bound and listening.
   bool get isRunning => _server != null;

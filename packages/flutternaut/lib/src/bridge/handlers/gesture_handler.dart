@@ -1,7 +1,7 @@
 import 'dart:ui';
 
-import '../gesture_dispatcher.dart';
-import '../main_thread_runner.dart';
+import '../engine/gesture_dispatcher.dart';
+import '../engine/main_thread_runner.dart';
 import '../models/action_result.dart';
 import '../router.dart';
 
@@ -83,7 +83,8 @@ class GestureHandler {
   Future<Map<String, dynamic>> _clearText(BridgeRequest req) async {
     req.requireLocator();
     final success = await _runner.run(
-      () => _gesture.clearText(key: req.string('key'), text: req.string('text')),
+      () =>
+          _gesture.clearText(key: req.string('key'), text: req.string('text')),
     );
     return ActionResult(action: 'clear_text', success: success).toJson();
   }
@@ -107,8 +108,8 @@ class GestureHandler {
       () => _gesture.longPress(
         key: req.string('key'),
         text: req.string('text'),
-        duration:
-            Duration(milliseconds: req.integer('duration_ms', defaultValue: 600)),
+        duration: Duration(
+            milliseconds: req.integer('duration_ms', defaultValue: 600)),
       ),
     );
     return ActionResult(action: 'long_press', success: success).toJson();

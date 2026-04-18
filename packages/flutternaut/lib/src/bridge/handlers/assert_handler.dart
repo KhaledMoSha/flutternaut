@@ -1,7 +1,7 @@
-import '../main_thread_runner.dart';
+import '../engine/main_thread_runner.dart';
+import '../engine/tree_walker.dart';
 import '../models/assert_result.dart';
 import '../router.dart';
-import '../tree_walker.dart';
 import '_locator.dart';
 
 /// Handles assertion endpoints.

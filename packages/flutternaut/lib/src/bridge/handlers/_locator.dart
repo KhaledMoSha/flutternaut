@@ -1,7 +1,7 @@
+import '../engine/tree_walker.dart';
 import '../models/element_info.dart';
 import '../models/visibility_result.dart';
 import '../router.dart';
-import '../tree_walker.dart';
 
 /// Resolves an element by the `key` or `text` locator field on [req].
 /// Returns null if neither is present or neither matches.

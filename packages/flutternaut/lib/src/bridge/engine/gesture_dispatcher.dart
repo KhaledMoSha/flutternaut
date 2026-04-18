@@ -1,7 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/widgets.dart';
 
-import 'models/element_info.dart';
+import '../models/element_info.dart';
 import 'pointer_session.dart';
 import 'tree_walker.dart';
 

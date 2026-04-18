@@ -1,6 +1,6 @@
-import '../main_thread_runner.dart';
+import '../engine/main_thread_runner.dart';
+import '../engine/tree_walker.dart';
 import '../router.dart';
-import '../tree_walker.dart';
 
 /// Handles element finding endpoints.
 class FindHandler {
@@ -24,7 +24,8 @@ class FindHandler {
     final text = req.string('text');
 
     return _runner.run(() {
-      final info = key != null ? _walker.findByKey(key) : _walker.findByText(text!);
+      final info =
+          key != null ? _walker.findByKey(key) : _walker.findByText(text!);
       if (info != null) return info.toJson();
       return {
         'found': false,
@@ -40,7 +41,8 @@ class FindHandler {
     final exact = req.boolean('exact', defaultValue: true);
 
     return _runner.run(() {
-      final info = exact ? _walker.findByText(text) : _walker.findByTextContains(text);
+      final info =
+          exact ? _walker.findByText(text) : _walker.findByTextContains(text);
       return info?.toJson() ?? {'found': false, 'text': text};
     });
   }
