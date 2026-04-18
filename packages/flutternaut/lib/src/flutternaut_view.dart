@@ -30,5 +30,6 @@ class FlutternautView {
   /// The view name used for grouping in the keys file.
   final String name;
 
+  /// Creates a [FlutternautView] annotation with the given view [name].
   const FlutternautView(this.name);
 }
