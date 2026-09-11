@@ -1,5 +1,5 @@
 name: flutternaut_example
-description: Example app demonstrating Flutternaut widgets and view annotations.
+description: Example app demonstrating the Flutternaut bridge, ValueKeys and @FlutternautView annotations.
 publish_to: 'none'
 version: 1.0.0
 
@@ -16,7 +16,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  flutternaut_generator: ^0.0.2
+  flutternaut_generator:
+    path: ../../flutternaut_generator
 
 flutter:
   uses-material-design: true

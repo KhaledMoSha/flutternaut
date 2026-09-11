@@ -44,7 +44,12 @@ class QueryHandler {
   Future<Map<String, dynamic>> _isVisible(BridgeRequest req) async {
     return _runner.run<Map<String, dynamic>>(() {
       final result = resolveVisibility(req, _walker);
-      return {'visible': result.visible, 'exists': result.exists};
+      return {
+        'visible': result.visible,
+        'exists': result.exists,
+        'on_screen': result.onScreen,
+        'obstructed': result.obstructed,
+      };
     });
   }
 

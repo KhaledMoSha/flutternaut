@@ -1,14 +1,15 @@
-/// Annotation that groups all [Flutternaut] widgets inside this class
-/// under a named view in the generated keys file.
+/// Annotation that groups every `ValueKey` inside this class under a named
+/// view in the generated keys file (`flutternaut_keys.json`).
 ///
-/// This annotation is **optional** — Flutternaut widgets work without it.
-/// It is only read by the generator at build time and has **no runtime
-/// effect**. Adding or removing it does not change your app's behavior.
+/// This annotation is **optional** — the bridge resolves widgets by key or
+/// visible text without it. It is only read by `flutternaut_generator` at
+/// build time and has **no runtime effect**. Adding or removing it does not
+/// change your app's behavior.
 ///
-/// The generator scans for this annotation on widget classes and sets the
-/// `view` field on all elements found within. The AI prompt then groups
-/// labels by view so users can say "test the login view" and the AI knows
-/// which elements belong there.
+/// The generator scans for this annotation on widget classes and files the
+/// keys found inside under that view (keys outside any annotated class go to
+/// `_ungrouped`). The Flutternaut desktop Test Editor uses the grouping to
+/// offer per-screen target dropdowns.
 ///
 /// For widgets split across multiple files, repeat the annotation on each
 /// class that belongs to the same view.
@@ -20,8 +21,12 @@
 ///   @override
 ///   Widget build(BuildContext context) {
 ///     return Column(children: [
-///       Flutternaut.input(label: 'email_input', child: TextField()),
-///       Flutternaut.button(label: 'login_button', child: ElevatedButton(...)),
+///       TextField(key: const ValueKey('email_input')),
+///       ElevatedButton(
+///         key: const ValueKey('login_button'),
+///         onPressed: _submit,
+///         child: const Text('Login'),
+///       ),
 ///     ]);
 ///   }
 /// }

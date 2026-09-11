@@ -1,3 +1,4 @@
+export 'action_failure.dart';
 export 'action_result.dart';
 export 'assert_result.dart';
 export 'element_info.dart';

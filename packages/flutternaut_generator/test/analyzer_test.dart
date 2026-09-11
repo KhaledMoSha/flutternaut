@@ -1,333 +1,343 @@
-import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutternaut_generator/src/analyzer.dart';
+import 'package:flutternaut_generator/src/models.dart';
+import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-import 'package:flutternaut_generator/flutternaut_generator.dart';
-
-/// Wraps a widget expression in a valid Dart function body.
-String _wrap(String expr) => 'void f() { $expr; }';
+/// Writes [files] (relative path → source) into a fresh temp directory
+/// laid out as a Flutter-ish project (everything under `lib/`) and runs
+/// [FlutternautAnalyzer.scanDirectory] on it.
+Map<String, ViewKeys> _scan(Map<String, String> files) {
+  final tmp = Directory.systemTemp.createTempSync('flutternaut_test_');
+  try {
+    for (final entry in files.entries) {
+      final path = p.join(tmp.path, 'lib', entry.key);
+      Directory(p.dirname(path)).createSync(recursive: true);
+      File(path).writeAsStringSync(entry.value);
+    }
+    return FlutternautAnalyzer().scanDirectory(tmp.path);
+  } finally {
+    tmp.deleteSync(recursive: true);
+  }
+}
 
 void main() {
-  late FlutternautAnalyzer analyzer;
+  group('basic key extraction', () {
+    test('detects ValueKey on a bare widget call (no const)', () {
+      final views = _scan({
+        'screen.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
 
-  setUp(() {
-    analyzer = FlutternautAnalyzer();
-  });
+          @FlutternautView('Login')
+          class LoginScreen extends StatelessWidget {
+            @override
+            Widget build(BuildContext context) {
+              return ElevatedButton(
+                key: const ValueKey('login_button'),
+                onPressed: () {},
+                child: const Text('Login'),
+              );
+            }
+          }
+        ''',
+      });
 
-  group('constructor type detection', () {
-    test('default constructor maps to "element"', () {
-      final source = _wrap(
-          "Flutternaut(label: 'drag_target', child: Container())");
-      final elements = analyzer.analyzeSource(source, 'lib/my_widget.dart');
-      expect(elements, hasLength(1));
-      expect(elements.first.type, 'element');
+      expect(views.keys, contains('Login'));
+      final el = views['Login']!.elements
+          .firstWhere((e) => e.label == 'login_button');
+      expect(el.widget, 'ElevatedButton');
+      expect(el.role, KeyRole.action);
+      expect(el.isDynamic, isFalse);
     });
 
-    test('named constructors map to their names', () {
-      final source = _wrap('''
-Column(children: [
-  Flutternaut.input(label: 'email_input', child: TextField()),
-  Flutternaut.button(label: 'login_button', child: ElevatedButton(onPressed: () {}, child: Text('Login'))),
-  Flutternaut.text(label: 'error_text', child: Text('Error')),
-  Flutternaut.item(label: 'list_item', child: ListTile()),
-  Flutternaut.checkbox(label: 'agree_check', checked: false, child: Checkbox(value: false, onChanged: (_) {})),
-])''');
-      final elements = analyzer.analyzeSource(source, 'lib/login.dart');
-      expect(elements, hasLength(5));
-      expect(elements[0].type, 'input');
-      expect(elements[1].type, 'button');
-      expect(elements[2].type, 'text');
-      expect(elements[3].type, 'item');
-      expect(elements[4].type, 'checkbox');
-    });
-  });
+    test('detects ValueKey on a const-prefixed widget call', () {
+      final views = _scan({
+        'screen.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
 
-  group('label extraction', () {
-    test('extracts static string labels', () {
-      final source = _wrap('''
-Flutternaut.button(
-  label: 'submit_button',
-  child: ElevatedButton(onPressed: () {}, child: Text('Submit')),
-)''');
-      final elements = analyzer.analyzeSource(source, 'lib/home.dart');
-      expect(elements.first.label, 'submit_button');
-      expect(elements.first.isDynamic, false);
+          @FlutternautView('Home')
+          class HomeScreen extends StatelessWidget {
+            @override
+            Widget build(BuildContext context) {
+              return const Text('hello', key: ValueKey('greeting'));
+            }
+          }
+        ''',
+      });
+
+      final el = views['Home']!.elements
+          .firstWhere((e) => e.label == 'greeting');
+      expect(el.widget, 'Text');
+      expect(el.role, KeyRole.field);
     });
 
-    test(r'detects dynamic labels with $index', () {
-      final source =
-          _wrap(r"Flutternaut.item(label: 'todo_item_$index', child: Text('item'))");
-      final elements = analyzer.analyzeSource(source, 'lib/todo.dart');
-      expect(elements.first.isDynamic, true);
-      expect(elements.first.label, 'todo_item_{index}');
+    test('KeyedSubtree wrapper inherits its child widget type', () {
+      final views = _scan({
+        'screen.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
+
+          @FlutternautView('Login')
+          class LoginScreen extends StatelessWidget {
+            @override
+            Widget build(BuildContext context) {
+              return KeyedSubtree(
+                key: const ValueKey('error_text'),
+                child: Text('boom'),
+              );
+            }
+          }
+        ''',
+      });
+
+      final el = views['Login']!.elements
+          .firstWhere((e) => e.label == 'error_text');
+      expect(el.widget, 'Text', reason: 'KeyedSubtree should pass through');
+      expect(el.role, KeyRole.field);
     });
 
-    test(r'detects dynamic labels with ${expr}', () {
-      final source = _wrap(
-          r"Flutternaut.item(label: 'row_${items.indexOf(item)}', child: Text('row'))");
-      final elements = analyzer.analyzeSource(source, 'lib/list.dart');
-      expect(elements.first.isDynamic, true);
-      expect(elements.first.label, 'row_{index}');
-    });
+    test('keys outside any @FlutternautView land in _ungrouped', () {
+      final views = _scan({
+        'utils.dart': '''
+          import 'package:flutter/material.dart';
 
-    test('rewrites named variables in interpolation', () {
-      final source = _wrap(
-          r"Flutternaut.text(label: 'user_${name}_label', child: Text('name'))");
-      final elements = analyzer.analyzeSource(source, 'lib/profile.dart');
-      expect(elements.first.isDynamic, true);
-      expect(elements.first.label, 'user_{name}_label');
-    });
-  });
+          Widget banner() {
+            return ElevatedButton(
+              key: const ValueKey('global_button'),
+              onPressed: () {},
+              child: const Text('Tap'),
+            );
+          }
+        ''',
+      });
 
-  group('description extraction', () {
-    test('extracts description when present', () {
-      final source = _wrap('''
-Flutternaut.text(
-  label: 'item_count',
-  description: 'Shows total number of items',
-  child: Text('5 items'),
-)''');
-      final elements = analyzer.analyzeSource(source, 'lib/dash.dart');
-      expect(elements.first.description, 'Shows total number of items');
-    });
-
-    test('description is null when not provided', () {
-      final source =
-          _wrap("Flutternaut.button(label: 'btn', child: Container())");
-      final elements = analyzer.analyzeSource(source, 'lib/simple.dart');
-      expect(elements.first.description, isNull);
-    });
-  });
-
-  group('file tracking', () {
-    test('elements include their file path', () {
-      final source =
-          _wrap("Flutternaut.button(label: 'btn', child: Container())");
-      final elements = analyzer.analyzeSource(source, 'lib/login.dart');
-      expect(elements.first.file, 'lib/login.dart');
-    });
-
-    test('multiple elements from same file share the path', () {
-      final source = _wrap('''
-Column(children: [
-  Flutternaut.input(label: 'name_input', child: TextField()),
-  Flutternaut.input(label: 'email_input', child: TextField()),
-  Flutternaut.button(label: 'submit_btn', child: ElevatedButton(onPressed: () {}, child: Text('Go'))),
-])''');
-      final elements = analyzer.analyzeSource(source, 'lib/form.dart');
-      expect(elements, hasLength(3));
-      expect(elements.every((e) => e.file == 'lib/form.dart'), true);
-    });
-  });
-
-  group('edge cases', () {
-    test('file with no Flutternaut widgets returns empty', () {
-      final source = _wrap('Container()');
-      final elements = analyzer.analyzeSource(source, 'lib/plain.dart');
-      expect(elements, isEmpty);
-    });
-
-    test('ignores raw Semantics widgets', () {
-      final source =
-          _wrap("Semantics(label: 'raw_label', child: Container())");
-      final elements = analyzer.analyzeSource(source, 'lib/raw.dart');
-      expect(elements, isEmpty);
-    });
-
-    test('handles const Flutternaut constructors', () {
-      const source =
-          "final x = const Flutternaut.button(label: 'const_btn', child: SizedBox());";
-      final elements = analyzer.analyzeSource(source, 'lib/const.dart');
-      expect(elements, hasLength(1));
-      expect(elements.first.label, 'const_btn');
-      expect(elements.first.type, 'button');
-    });
-  });
-
-  group('view annotation', () {
-    test('@FlutternautView sets view on elements', () {
-      const source = '''
-@FlutternautView('Login')
-class LoginScreen extends StatelessWidget {
-  Widget build(BuildContext context) {
-    return Flutternaut.button(label: 'login_button', child: Container());
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/login.dart');
-      expect(elements, hasLength(1));
-      expect(elements.first.view, 'Login');
-    });
-
-    test('@FlutternautView on StatefulWidget propagates to State class', () {
-      const source = '''
-@FlutternautView('Login')
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-
-class _LoginScreenState extends State<LoginScreen> {
-  Widget build(BuildContext context) {
-    return Flutternaut.input(label: 'email_input', child: TextField());
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/login.dart');
-      expect(elements, hasLength(1));
-      expect(elements.first.label, 'email_input');
-      expect(elements.first.view, 'Login');
-    });
-
-    test('elements without annotation have null view', () {
-      const source = '''
-class HomeScreen extends StatelessWidget {
-  Widget build(BuildContext context) {
-    return Flutternaut.button(label: 'home_button', child: Container());
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/home.dart');
-      expect(elements.first.view, isNull);
-    });
-
-    test('two classes with different views in same file', () {
-      const source = '''
-@FlutternautView('Login')
-class LoginScreen extends StatelessWidget {
-  Widget build(BuildContext context) {
-    return Flutternaut.input(label: 'email_input', child: TextField());
-  }
-}
-
-@FlutternautView('Profile')
-class ProfileScreen extends StatelessWidget {
-  Widget build(BuildContext context) {
-    return Flutternaut.text(label: 'username', child: Text(''));
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/screens.dart');
-      expect(elements, hasLength(2));
-      expect(elements[0].view, 'Login');
-      expect(elements[1].view, 'Profile');
-    });
-
-    test('view field included in JSON only when non-null', () {
-      const withView = FlutternautElement(
-          label: 'btn', type: 'button', view: 'Login', file: 'lib/a.dart');
-      expect(withView.toJson()['view'], 'Login');
-
-      const withoutView = FlutternautElement(
-          label: 'btn', type: 'button', file: 'lib/a.dart');
-      expect(withoutView.toJson().containsKey('view'), false);
-    });
-
-    test('@FlutternautView with static const reference resolves value', () {
-      const source = '''
-@FlutternautView(AppRoutes.trip)
-class TripScreen extends StatelessWidget {
-  Widget build(BuildContext context) {
-    return Flutternaut.button(label: 'trip_btn', child: Container());
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/trip.dart',
-          constMap: {'AppRoutes.trip': '/tripView'});
-      expect(elements, hasLength(1));
-      expect(elements.first.view, '/tripView');
-    });
-
-    test('@FlutternautView with top-level const resolves value', () {
-      const source = '''
-@FlutternautView(tripRoute)
-class TripScreen extends StatelessWidget {
-  Widget build(BuildContext context) {
-    return Flutternaut.button(label: 'trip_btn', child: Container());
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/trip.dart',
-          constMap: {'tripRoute': '/tripView'});
-      expect(elements, hasLength(1));
-      expect(elements.first.view, '/tripView');
-    });
-
-    test('@FlutternautView with unknown reference falls back to source text',
-        () {
-      const source = '''
-@FlutternautView(UnknownRoutes.trip)
-class TripScreen extends StatelessWidget {
-  Widget build(BuildContext context) {
-    return Flutternaut.button(label: 'trip_btn', child: Container());
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/trip.dart');
-      expect(elements, hasLength(1));
-      expect(elements.first.view, 'UnknownRoutes.trip');
-    });
-
-    test('@FlutternautView const ref propagates to State class', () {
-      const source = '''
-@FlutternautView(AppRoutes.login)
-class LoginScreen extends StatefulWidget {
-  @override
-  State<LoginScreen> createState() => _LoginScreenState();
-}
-class _LoginScreenState extends State<LoginScreen> {
-  Widget build(BuildContext context) {
-    return Flutternaut.input(label: 'email', child: TextField());
-  }
-}
-''';
-      final elements = analyzer.analyzeSource(source, 'lib/login.dart',
-          constMap: {'AppRoutes.login': '/loginView'});
-      expect(elements, hasLength(1));
-      expect(elements.first.view, '/loginView');
-    });
-  });
-
-  group('models', () {
-    test('FlutternautElement.toJson includes dynamic field only when true',
-        () {
-      const staticEl = FlutternautElement(
-          label: 'btn', type: 'button', file: 'lib/a.dart');
-      expect(staticEl.toJson().containsKey('dynamic'), false);
-
-      const dynamicEl = FlutternautElement(
-          label: 'item_{index}',
-          type: 'item',
-          isDynamic: true,
-          file: 'lib/a.dart');
-      expect(dynamicEl.toJson()['dynamic'], true);
-    });
-
-    test('FlutternautElement.toJson includes file path', () {
-      const el = FlutternautElement(
-          label: 'btn', type: 'button', file: 'lib/login.dart');
-      expect(el.toJson()['file'], 'lib/login.dart');
-    });
-
-    test('KeysOutput.toJsonString produces valid JSON', () {
-      final output = KeysOutput(
-        generatedAt: DateTime.utc(2026, 3, 10, 12),
-        package: 'my_app',
-        elements: [
-          const FlutternautElement(
-              label: 'email_input', type: 'input', file: 'lib/login.dart'),
-        ],
+      expect(views.keys, contains('_ungrouped'));
+      expect(
+        views['_ungrouped']!.elements.map((e) => e.label),
+        contains('global_button'),
       );
+    });
+  });
 
-      final json = output.toJsonString();
-      final parsed = Map<String, dynamic>.from(
-        jsonDecode(json) as Map,
+  group('view inheritance', () {
+    test('State<X> inherits @FlutternautView from its widget', () {
+      final views = _scan({
+        'screen.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
+
+          @FlutternautView('Login')
+          class LoginScreen extends StatefulWidget {
+            @override
+            State<LoginScreen> createState() => _LoginScreenState();
+          }
+
+          class _LoginScreenState extends State<LoginScreen> {
+            @override
+            Widget build(BuildContext context) {
+              return TextField(key: const ValueKey('email_input'));
+            }
+          }
+        ''',
+      });
+
+      expect(views['Login']!.elements.map((e) => e.label),
+          contains('email_input'));
+    });
+  });
+
+  group('inline itemBuilder rows', () {
+    test('groups dynamic keys inside a ListView.builder closure', () {
+      final views = _scan({
+        'home.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
+
+          @FlutternautView('Home')
+          class HomeScreen extends StatelessWidget {
+            final todos = const ['a', 'b'];
+            @override
+            Widget build(BuildContext context) {
+              return ListView.builder(
+                itemCount: todos.length,
+                itemBuilder: (context, index) => ListTile(
+                  leading: Checkbox(
+                    key: ValueKey('check_\$index'),
+                    value: false,
+                    onChanged: (_) {},
+                  ),
+                  title: Text(
+                    todos[index],
+                    key: ValueKey('todo_text_\$index'),
+                  ),
+                  trailing: IconButton(
+                    key: ValueKey('delete_\$index'),
+                    icon: const Icon(Icons.delete),
+                    onPressed: () {},
+                  ),
+                ),
+              );
+            }
+          }
+        ''',
+      });
+
+      expect(views['Home']!.rows, hasLength(1));
+      final row = views['Home']!.rows.first;
+      expect(row.searchPrefix, 'todo_text_');
+      expect(row.members.map((m) => m.label), [
+        'check_{index}',
+        'todo_text_{index}',
+        'delete_{index}',
+      ]);
+      // Row members are not duplicated in flat elements.
+      expect(views['Home']!.elements.map((e) => e.label),
+          isNot(contains('todo_text_{index}')));
+    });
+
+    test('normalises index variable name (idx) to {index}', () {
+      final views = _scan({
+        'home.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
+
+          @FlutternautView('Home')
+          class HomeScreen extends StatelessWidget {
+            @override
+            Widget build(BuildContext context) {
+              return ListView.builder(
+                itemBuilder: (context, idx) => Text(
+                  'x',
+                  key: ValueKey('row_text_\$idx'),
+                ),
+              );
+            }
+          }
+        ''',
+      });
+
+      final row = views['Home']!.rows.first;
+      expect(row.members.first.label, 'row_text_{index}');
+      expect(row.searchPrefix, 'row_text_');
+    });
+
+    test('action-only row has no search_prefix', () {
+      final views = _scan({
+        'home.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
+
+          @FlutternautView('Home')
+          class HomeScreen extends StatelessWidget {
+            @override
+            Widget build(BuildContext context) {
+              return ListView.builder(
+                itemBuilder: (context, index) => IconButton(
+                  key: ValueKey('delete_\$index'),
+                  icon: const Icon(Icons.delete),
+                  onPressed: () {},
+                ),
+              );
+            }
+          }
+        ''',
+      });
+
+      final row = views['Home']!.rows.first;
+      expect(row.searchPrefix, isNull);
+      expect(row.members.first.role, KeyRole.action);
+    });
+  });
+
+  group('custom row widget rows', () {
+    test('walks into a custom row widget class wired via index:', () {
+      final views = _scan({
+        'home.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
+          import 'todo_tile.dart';
+
+          @FlutternautView('Home')
+          class HomeScreen extends StatelessWidget {
+            @override
+            Widget build(BuildContext context) {
+              return ListView.builder(
+                itemBuilder: (context, index) => TodoTile(index: index),
+              );
+            }
+          }
+        ''',
+        'todo_tile.dart': '''
+          import 'package:flutter/material.dart';
+
+          class TodoTile extends StatelessWidget {
+            final int index;
+            const TodoTile({required this.index});
+
+            @override
+            Widget build(BuildContext context) {
+              return ListTile(
+                title: Text(
+                  'item',
+                  key: ValueKey('todo_text_\$index'),
+                ),
+                trailing: IconButton(
+                  key: ValueKey('delete_\$index'),
+                  icon: const Icon(Icons.delete),
+                  onPressed: () {},
+                ),
+              );
+            }
+          }
+        ''',
+      });
+
+      final row = views['Home']!.rows.first;
+      expect(row.rowClass, 'TodoTile');
+      expect(row.searchPrefix, 'todo_text_');
+      expect(row.members.map((m) => m.label),
+          containsAll(['todo_text_{index}', 'delete_{index}']));
+    });
+  });
+
+  group('JSON output shape', () {
+    test('serialises views, rows, elements with expected keys', () {
+      final views = _scan({
+        'screen.dart': '''
+          import 'package:flutter/material.dart';
+          import 'package:flutternaut/flutternaut.dart';
+
+          @FlutternautView('Login')
+          class LoginScreen extends StatelessWidget {
+            @override
+            Widget build(BuildContext context) {
+              return ElevatedButton(
+                key: const ValueKey('login_button'),
+                onPressed: () {},
+                child: const Text('Login'),
+              );
+            }
+          }
+        ''',
+      });
+
+      final out = KeysOutput(
+        generatedAt: DateTime.utc(2026, 4, 25),
+        package: 'demo',
+        views: views,
       );
-      expect(parsed['package'], 'my_app');
-      expect(parsed['generated_at'], '2026-03-10T12:00:00.000Z');
-      expect((parsed['elements'] as List).first['label'], 'email_input');
-      expect((parsed['elements'] as List).first['file'], 'lib/login.dart');
+      final json = out.toJson();
+      expect(json['package'], 'demo');
+      expect(json['generated_at'], '2026-04-25T00:00:00.000Z');
+      expect((json['views'] as Map).keys, contains('Login'));
+      final loginEl =
+          ((json['views'] as Map)['Login'] as Map)['elements'] as List;
+      expect(loginEl.first['label'], 'login_button');
+      expect(loginEl.first['role'], 'action');
+      expect(loginEl.first['widget'], 'ElevatedButton');
     });
   });
 }

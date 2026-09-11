@@ -4,6 +4,8 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
+import 'models/action_failure.dart';
+
 /// A parsed HTTP request with typed accessors for JSON body fields.
 class BridgeRequest {
   /// The raw [HttpRequest].
@@ -126,6 +128,11 @@ class BridgeRouter {
       final body = await _parseBody(request);
       final data = await handler(BridgeRequest(request, body));
       _ok(request, data);
+    } on ActionFailure catch (e) {
+      // A gesture could not be performed safely (missing / ambiguous /
+      // occluded target). Surface the descriptive reason — not a generic
+      // failure — so the test engine reports what actually went wrong.
+      _fail(request, e.message, status: 422);
     } on ArgumentError catch (e) {
       _fail(request, e.message.toString(), status: 400);
     } on FormatException catch (e) {

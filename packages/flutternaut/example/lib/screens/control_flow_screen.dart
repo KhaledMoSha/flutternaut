@@ -70,18 +70,15 @@ class _ControlFlowScreenState extends State<ControlFlowScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flutternaut.text(
-            label: 'counter_value',
-            value: '$_counter',
-            child: Text('Counter: $_counter'),
+          Text(
+            'Counter: $_counter',
+            key: const ValueKey('counter_value'),
           ),
           const SizedBox(height: 8),
-          Flutternaut.button(
-            label: 'increment_button',
-            child: ElevatedButton(
-              onPressed: () => setState(() => _counter++),
-              child: const Text('Increment'),
-            ),
+          ElevatedButton(
+            key: const ValueKey('increment_button'),
+            onPressed: () => setState(() => _counter++),
+            child: const Text('Increment'),
           ),
         ],
       ),
@@ -94,27 +91,22 @@ class _ControlFlowScreenState extends State<ControlFlowScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flutternaut.button(
-            label: 'toggle_message_button',
-            child: ElevatedButton(
-              onPressed: () => setState(() => _showMessage = !_showMessage),
-              child: Text(_showMessage ? 'Hide Message' : 'Show Message'),
-            ),
+          ElevatedButton(
+            key: const ValueKey('toggle_message_button'),
+            onPressed: () => setState(() => _showMessage = !_showMessage),
+            child: Text(_showMessage ? 'Hide Message' : 'Show Message'),
           ),
           const SizedBox(height: 8),
           if (_showMessage)
-            Flutternaut.text(
-              label: 'conditional_message',
-              value: 'Hello from conditional!',
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text('Hello from conditional!'),
+            Container(
+              key: const ValueKey('conditional_message'),
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.green.shade100,
+                borderRadius: BorderRadius.circular(8),
               ),
+              child: const Text('Hello from conditional!'),
             ),
         ],
       ),
@@ -127,27 +119,22 @@ class _ControlFlowScreenState extends State<ControlFlowScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flutternaut.button(
-            label: 'start_timer_button',
-            child: ElevatedButton(
-              onPressed: _startTimer,
-              child: const Text('Start 3s Timer'),
-            ),
+          ElevatedButton(
+            key: const ValueKey('start_timer_button'),
+            onPressed: _startTimer,
+            child: const Text('Start 3s Timer'),
           ),
           const SizedBox(height: 8),
           if (_delayedVisible)
-            Flutternaut.text(
-              label: 'delayed_element',
-              value: 'Appeared!',
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text('Appeared!'),
+            Container(
+              key: const ValueKey('delayed_element'),
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade100,
+                borderRadius: BorderRadius.circular(8),
               ),
+              child: const Text('Appeared!'),
             ),
         ],
       ),
@@ -160,23 +147,20 @@ class _ControlFlowScreenState extends State<ControlFlowScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flutternaut.text(
-            label: 'flow_item_count',
-            value: '${_items.length} items',
-            child: Text('${_items.length} items'),
+          Text(
+            '${_items.length} items',
+            key: const ValueKey('list_count'),
           ),
           const SizedBox(height: 4),
-          ...List.generate(_items.length, (index) {
-            return Flutternaut.text(
-              label: 'flow_item_$index',
-              value: _items[index],
-              child: ListTile(
-                dense: true,
-                leading: Text('#$index'),
-                title: Text(_items[index]),
-              ),
-            );
-          }),
+          ...List.generate(
+            _items.length,
+            (index) => ListTile(
+              key: ValueKey('numbered_item_$index'),
+              dense: true,
+              leading: Text('#$index'),
+              title: Text(_items[index]),
+            ),
+          ),
         ],
       ),
     );
@@ -188,30 +172,24 @@ class _ControlFlowScreenState extends State<ControlFlowScreen> {
       children: [
         SizedBox(
           height: 400,
-          child: Flutternaut.item(
-            label: 'flow_scroll_list',
+          child: KeyedSubtree(
+            key: const ValueKey('flow_scroll_list'),
             child: ListView.builder(
               itemCount: 51,
               itemExtent: 48,
               itemBuilder: (context, index) {
                 if (index == 50) {
-                  return Flutternaut.text(
-                    label: 'hidden_at_bottom',
-                    value: 'Found me!',
-                    child: const ListTile(
-                      dense: true,
-                      title: Text('Found me!'),
-                      leading: Icon(Icons.star, color: Colors.amber),
-                    ),
+                  return const ListTile(
+                    key: ValueKey('hidden_at_bottom'),
+                    dense: true,
+                    title: Text('Found me!'),
+                    leading: Icon(Icons.star, color: Colors.amber),
                   );
                 }
-                return Flutternaut.text(
-                  label: 'scroll_item_$index',
-                  value: 'Scroll Item $index',
-                  child: ListTile(
-                    dense: true,
-                    title: Text('Scroll Item $index'),
-                  ),
+                return ListTile(
+                  key: ValueKey('flow_scroll_item_$index'),
+                  dense: true,
+                  title: Text('Scroll Item $index'),
                 );
               },
             ),

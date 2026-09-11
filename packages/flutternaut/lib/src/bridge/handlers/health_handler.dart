@@ -18,6 +18,7 @@ class HealthHandler {
   void register(BridgeRouter router) {
     router.get('/health', _health);
     router.get('/tree', _tree);
+    router.get('/screen', _screen);
     router.get('/keyed', _keyed);
   }
 
@@ -31,6 +32,12 @@ class HealthHandler {
 
   Future<Map<String, dynamic>> _tree(BridgeRequest req) async {
     return _runner.run(() => _walker.dumpTree());
+  }
+
+  /// Only the widgets actually displayed on screen right now —
+  /// framework scaffolding and off-screen branches pruned.
+  Future<Map<String, dynamic>> _screen(BridgeRequest req) async {
+    return _runner.run(() => _walker.dumpVisibleTree());
   }
 
   Future<Map<String, dynamic>> _keyed(BridgeRequest req) async {

@@ -17,15 +17,13 @@ class _LoginScreenState extends State<LoginScreen> {
   String _error = '';
 
   void _login() async {
-    // Show loading dialog.
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) {
         return const Center(
-          child: Flutternaut.item(
-            label: 'loading_indicator',
-            child: CircularProgressIndicator(),
+          child: CircularProgressIndicator(
+            key: ValueKey('loading_indicator'),
           ),
         );
       },
@@ -33,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     await Future.delayed(const Duration(seconds: 1));
     if (!mounted) return;
-    Navigator.pop(context); // dismiss dialog
+    Navigator.pop(context);
 
     final email = _emailController.text.trim();
     final password = _passwordController.text;
@@ -85,44 +83,37 @@ class _LoginScreenState extends State<LoginScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Flutternaut.input(
-              label: 'email_input',
-              child: TextField(
-                controller: _emailController,
-                decoration: const InputDecoration(
-                  labelText: 'Email',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.emailAddress,
+            TextField(
+              key: const ValueKey('email_input'),
+              controller: _emailController,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                border: OutlineInputBorder(),
               ),
+              keyboardType: TextInputType.emailAddress,
             ),
             const SizedBox(height: 16),
-            Flutternaut.input(
-              label: 'password_input',
-              child: TextField(
-                controller: _passwordController,
-                decoration: const InputDecoration(
-                  labelText: 'Password',
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: true,
+            TextField(
+              key: const ValueKey('password_input'),
+              controller: _passwordController,
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(),
               ),
+              obscureText: true,
             ),
             const SizedBox(height: 24),
-            Flutternaut.button(
-              label: 'login_button',
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _login,
-                  child: const Text('Login'),
-                ),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                key: const ValueKey('login_button'),
+                onPressed: _login,
+                child: const Text('Login'),
               ),
             ),
             const SizedBox(height: 16),
-            Flutternaut.text(
-              label: 'error_text',
-              value: _error,
+            KeyedSubtree(
+              key: const ValueKey('error_text'),
               child: _error.isNotEmpty
                   ? Text(
                       _error,

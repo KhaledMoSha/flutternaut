@@ -69,17 +69,16 @@ class _GesturesScreenState extends State<GesturesScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Flutternaut.text(
-            label: 'scroll_result',
-            value: 'Last visible: $_lastVisibleIndex',
-            child: Text('Last visible: $_lastVisibleIndex'),
+          child: Text(
+            'Last visible: $_lastVisibleIndex',
+            key: const ValueKey('scroll_result'),
           ),
         ),
         const SizedBox(height: 4),
         SizedBox(
           height: 200,
-          child: Flutternaut.item(
-            label: 'scroll_list',
+          child: KeyedSubtree(
+            key: const ValueKey('scroll_list'),
             child: NotificationListener<ScrollNotification>(
               onNotification: (notification) {
                 if (notification is ScrollUpdateNotification) {
@@ -94,10 +93,10 @@ class _GesturesScreenState extends State<GesturesScreen> {
                 itemCount: 20,
                 itemExtent: 48,
                 itemBuilder: (context, index) {
-                  return Flutternaut.text(
-                    label: 'scroll_item_$index',
-                    value: 'Item $index',
-                    child: ListTile(dense: true, title: Text('Item $index')),
+                  return ListTile(
+                    key: ValueKey('scroll_item_$index'),
+                    dense: true,
+                    title: Text('Item $index'),
                   );
                 },
               ),
@@ -114,19 +113,17 @@ class _GesturesScreenState extends State<GesturesScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Flutternaut.text(
-            label: 'swipe_count',
-            value: '${_swipeItems.length} items',
-            child: Text('${_swipeItems.length} items'),
+          child: Text(
+            '${_swipeItems.length} items',
+            key: const ValueKey('swipe_count'),
           ),
         ),
         const SizedBox(height: 4),
         ..._swipeItems.asMap().entries.map((entry) {
           final index = entry.key;
           final item = entry.value;
-          return Flutternaut.text(
-            label: 'swipe_item_$index',
-            value: item,
+          return KeyedSubtree(
+            key: ValueKey('swipe_item_$index'),
             child: Dismissible(
               key: ValueKey(item),
               direction: DismissDirection.endToStart,
@@ -157,27 +154,24 @@ class _GesturesScreenState extends State<GesturesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flutternaut.text(
-            label: 'long_press_status',
-            value: _longPressStatus,
-            child: Text('Status: $_longPressStatus'),
+          Text(
+            'Status: $_longPressStatus',
+            key: const ValueKey('long_press_status'),
           ),
           const SizedBox(height: 8),
-          Flutternaut.button(
-            label: 'long_press_target',
-            child: GestureDetector(
-              onLongPress: () {
-                setState(() => _longPressStatus = 'Long pressed!');
-              },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text('Long press me', textAlign: TextAlign.center),
+          GestureDetector(
+            key: const ValueKey('long_press_target'),
+            onLongPress: () {
+              setState(() => _longPressStatus = 'Long pressed!');
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade100,
+                borderRadius: BorderRadius.circular(8),
               ),
+              child: const Text('Long press me', textAlign: TextAlign.center),
             ),
           ),
         ],
@@ -191,27 +185,24 @@ class _GesturesScreenState extends State<GesturesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flutternaut.text(
-            label: 'double_tap_count',
-            value: '$_doubleTapCount',
-            child: Text('Count: $_doubleTapCount'),
+          Text(
+            'Count: $_doubleTapCount',
+            key: const ValueKey('double_tap_count'),
           ),
           const SizedBox(height: 8),
-          Flutternaut.button(
-            label: 'double_tap_target',
-            child: GestureDetector(
-              onDoubleTap: () {
-                setState(() => _doubleTapCount++);
-              },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Text('Double tap me', textAlign: TextAlign.center),
+          GestureDetector(
+            key: const ValueKey('double_tap_target'),
+            onDoubleTap: () {
+              setState(() => _doubleTapCount++);
+            },
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green.shade100,
+                borderRadius: BorderRadius.circular(8),
               ),
+              child: const Text('Double tap me', textAlign: TextAlign.center),
             ),
           ),
         ],
@@ -225,17 +216,16 @@ class _GesturesScreenState extends State<GesturesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flutternaut.text(
-            label: 'drag_status',
-            value: _dragStatus,
-            child: Text('Status: $_dragStatus'),
+          Text(
+            'Status: $_dragStatus',
+            key: const ValueKey('drag_status'),
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              Flutternaut.item(
-                label: 'drag_source',
+              KeyedSubtree(
+                key: const ValueKey('drag_source'),
                 child: _dragSourceVisible
                     ? LongPressDraggable<String>(
                         data: 'dragged_item',
@@ -280,8 +270,8 @@ class _GesturesScreenState extends State<GesturesScreen> {
                       ),
               ),
               const Icon(Icons.arrow_forward),
-              Flutternaut(
-                label: 'drag_target',
+              KeyedSubtree(
+                key: const ValueKey('drag_target'),
                 child: DragTarget<String>(
                   onAcceptWithDetails: (details) {
                     setState(() {

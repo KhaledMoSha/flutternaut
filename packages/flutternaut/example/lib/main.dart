@@ -1,8 +1,14 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutternaut/flutternaut.dart';
 
 import 'screens/login_screen.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (kDebugMode) {
+    await FlutternautBridge.ensureInitialized();
+  }
   runApp(const FlutternautExampleApp());
 }
 

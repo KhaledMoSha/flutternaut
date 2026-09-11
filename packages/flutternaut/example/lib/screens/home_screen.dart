@@ -63,42 +63,34 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('My Todos'),
         automaticallyImplyLeading: false,
         actions: [
-          Flutternaut.button(
-            label: 'gestures_button',
-            child: IconButton(
-              icon: const Icon(Icons.touch_app),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const GesturesScreen()),
-              ),
+          IconButton(
+            key: const ValueKey('gestures_button'),
+            icon: const Icon(Icons.touch_app),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const GesturesScreen()),
             ),
           ),
-          Flutternaut.button(
-            label: 'device_button',
-            child: IconButton(
-              icon: const Icon(Icons.devices),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const DeviceScreen()),
-              ),
+          IconButton(
+            key: const ValueKey('device_button'),
+            icon: const Icon(Icons.devices),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const DeviceScreen()),
             ),
           ),
-          Flutternaut.button(
-            label: 'flow_button',
-            child: IconButton(
-              icon: const Icon(Icons.account_tree),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const ControlFlowScreen()),
-              ),
+          IconButton(
+            key: const ValueKey('flow_button'),
+            icon: const Icon(Icons.account_tree),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ControlFlowScreen()),
             ),
           ),
-          Flutternaut.button(
-            label: 'logout_button',
-            child: IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () => Navigator.pop(context),
-            ),
+          IconButton(
+            key: const ValueKey('logout_button'),
+            icon: const Icon(Icons.logout),
+            onPressed: () => Navigator.pop(context),
           ),
         ],
       ),
@@ -109,24 +101,20 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: Flutternaut.input(
-                    label: 'todo_input',
-                    child: TextField(
-                      controller: _todoController,
-                      decoration: const InputDecoration(
-                        hintText: 'Add a todo...',
-                        border: OutlineInputBorder(),
-                      ),
+                  child: TextField(
+                    key: const ValueKey('todo_input'),
+                    controller: _todoController,
+                    decoration: const InputDecoration(
+                      hintText: 'Add a todo...',
+                      border: OutlineInputBorder(),
                     ),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Flutternaut.button(
-                  label: 'add_button',
-                  child: ElevatedButton(
-                    onPressed: _addTodo,
-                    child: const Text('Add'),
-                  ),
+                ElevatedButton(
+                  key: const ValueKey('add_button'),
+                  onPressed: _addTodo,
+                  child: const Text('Add'),
                 ),
               ],
             ),
@@ -135,15 +123,12 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Flutternaut.text(
-                label: 'todo_count',
-                value: '${_todos.length} items',
-                child: Text(
-                  '${_todos.length} items',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+              child: Text(
+                '${_todos.length} items',
+                key: const ValueKey('todo_count'),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
@@ -160,32 +145,24 @@ class _HomeScreenState extends State<HomeScreen> {
                     vertical: 4.0,
                   ),
                   child: ListTile(
-                    leading: Flutternaut.checkbox(
-                      label: 'check_$index',
-                      checked: todo.completed,
-                      child: Checkbox(
-                        value: todo.completed,
-                        onChanged: (_) => _toggleTodo(index),
+                    leading: Checkbox(
+                      key: ValueKey('check_$index'),
+                      value: todo.completed,
+                      onChanged: (_) => _toggleTodo(index),
+                    ),
+                    title: Text(
+                      todo.text,
+                      key: ValueKey('todo_text_$index'),
+                      style: TextStyle(
+                        decoration: todo.completed
+                            ? TextDecoration.lineThrough
+                            : TextDecoration.none,
                       ),
                     ),
-                    title: Flutternaut.item(
-                      label: 'todo_text_$index',
-                      value: todo.text,
-                      child: Text(
-                        todo.text,
-                        style: TextStyle(
-                          decoration: todo.completed
-                              ? TextDecoration.lineThrough
-                              : TextDecoration.none,
-                        ),
-                      ),
-                    ),
-                    trailing: Flutternaut.item(
-                      label: 'delete_$index',
-                      child: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => _deleteTodo(index),
-                      ),
+                    trailing: IconButton(
+                      key: ValueKey('delete_$index'),
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      onPressed: () => _deleteTodo(index),
                     ),
                   ),
                 );

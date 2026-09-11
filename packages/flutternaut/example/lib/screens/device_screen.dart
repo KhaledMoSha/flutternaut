@@ -31,10 +31,9 @@ class _DeviceScreenState extends State<DeviceScreen> {
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            Flutternaut.text(
-              label: 'orientation_status',
-              value: orientationStr,
-              child: Text('Orientation: $orientationStr'),
+            Text(
+              'Orientation: $orientationStr',
+              key: const ValueKey('orientation_status'),
             ),
           ],
         ),

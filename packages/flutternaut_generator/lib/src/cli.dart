@@ -9,8 +9,8 @@ import 'models.dart';
 
 /// Runs the Flutternaut generator CLI with the given [arguments].
 ///
-/// This is the shared entry point used by both `flutternaut_generator`
-/// and the `flutternaut` wrapper CLI.
+/// Shared entry point for both `flutternaut_generator` and the
+/// `flutternaut` wrapper CLI.
 void runFlutternautCli(List<String> arguments) {
   final parser = ArgParser()
     ..addOption('output',
@@ -24,7 +24,6 @@ void runFlutternautCli(List<String> arguments) {
     return;
   }
 
-  // The project directory is the first positional arg, or current dir
   final projectPath = results.rest.isEmpty
       ? Directory.current.path
       : p.normalize(p.absolute(results.rest.first));
@@ -41,46 +40,37 @@ void runFlutternautCli(List<String> arguments) {
     exit(1);
   }
 
-  // Read pubspec.yaml
-  final pubspecFile = File(p.join(projectPath, 'pubspec.yaml'));
-  final pubspec = _readPubspec(pubspecFile);
-  final packageName = pubspec.name;
-
-  // Resolve output path: CLI flag > pubspec config > default
+  final pubspec = _readPubspec(File(p.join(projectPath, 'pubspec.yaml')));
   final outputPath =
       results['output'] as String? ?? pubspec.output ?? 'flutternaut_keys.json';
 
-  // Scan
-  final analyzer = FlutternautAnalyzer();
-  final elements = analyzer.scanDirectory(projectPath);
+  final views = FlutternautAnalyzer().scanDirectory(projectPath);
 
-  // Build output
   final output = KeysOutput(
     generatedAt: DateTime.now(),
-    package: packageName,
-    elements: elements,
+    package: pubspec.name,
+    views: views,
   );
 
-  // Write
   final outputFile = File(
       p.isAbsolute(outputPath) ? outputPath : p.join(projectPath, outputPath));
-
-  // Create parent directories if needed
-  final parentDir = outputFile.parent;
-  if (!parentDir.existsSync()) {
-    parentDir.createSync(recursive: true);
+  if (!outputFile.parent.existsSync()) {
+    outputFile.parent.createSync(recursive: true);
   }
-
   outputFile.writeAsStringSync(output.toJsonString());
 
-  stdout.writeln('Found ${elements.length} elements.');
+  final totalRows = views.values.fold<int>(0, (sum, v) => sum + v.rows.length);
+  final totalElements =
+      views.values.fold<int>(0, (sum, v) => sum + v.elements.length);
+  stdout.writeln(
+    'Found ${views.length} view(s), $totalRows row(s), $totalElements element(s).',
+  );
   stdout.writeln('Output: ${outputFile.path}');
 }
 
 class _PubspecConfig {
   final String name;
   final String? output;
-
   const _PubspecConfig({required this.name, this.output});
 }
 
@@ -89,16 +79,13 @@ _PubspecConfig _readPubspec(File pubspecFile) {
     return const _PubspecConfig(name: 'unknown');
   }
 
-  final content = pubspecFile.readAsStringSync();
-  final yaml = loadYaml(content);
-
+  final yaml = loadYaml(pubspecFile.readAsStringSync());
   if (yaml is! YamlMap) {
     return const _PubspecConfig(name: 'unknown');
   }
 
   final name = yaml['name']?.toString() ?? 'unknown';
 
-  // Support both "flutternaut" and "flutternaut_generator" config keys
   String? output;
   final config = yaml['flutternaut'] ?? yaml['flutternaut_generator'];
   if (config is YamlMap) {
@@ -109,15 +96,18 @@ _PubspecConfig _readPubspec(File pubspecFile) {
 }
 
 void _printUsage(ArgParser parser) {
-  stdout.writeln('Usage: dart run flutternaut [options] [project_path]');
+  stdout.writeln('Usage: dart run flutternaut_generator [options] [project_path]');
   stdout.writeln();
-  stdout.writeln('Scans a Flutter project for Flutternaut widgets and');
-  stdout.writeln('extracts labels into flutternaut_keys.json.');
+  stdout.writeln('Scans a Flutter project for `@FlutternautView`-annotated screens');
+  stdout.writeln('and the `ValueKey` literals inside them, then writes a structured');
+  stdout.writeln('JSON file grouped by view (with list-row members detected).');
   stdout.writeln();
-  stdout.writeln('Configure output path in pubspec.yaml:');
+  stdout.writeln('Configure the output path in your pubspec.yaml:');
   stdout.writeln();
   stdout.writeln('  flutternaut:');
-  stdout.writeln('    output: custom/path/keys.json');
+  stdout.writeln('    output: lib/generated/flutternaut_keys.json');
+  stdout.writeln();
+  stdout.writeln('(the legacy `flutternaut_generator:` key is still read as a fallback)');
   stdout.writeln();
   stdout.writeln(parser.usage);
 }
