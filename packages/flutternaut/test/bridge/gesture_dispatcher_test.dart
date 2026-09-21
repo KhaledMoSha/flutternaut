@@ -551,6 +551,121 @@ void main() {
           reason: 'tapping the hint should focus the field');
     });
 
+    testWidgets(
+        'does not scroll a non-user-scrollable ancestor (overlay PageView)',
+        (tester) async {
+      // Regression: debug overlays (e.g. requests_inspector) wrap the whole
+      // app in a PageView with NeverScrollableScrollPhysics. ensureVisible
+      // used to scroll EVERY ancestor so the target sat at its leading edge,
+      // dragging the hidden overlay page into view on every tap.
+      final pages = PageController();
+      addTearDown(pages.dispose);
+      var tapped = false;
+      await tester.pumpWidget(_app(
+        PageView(
+          controller: pages,
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            Align(
+              alignment: Alignment.bottomRight,
+              child: ElevatedButton(
+                key: const ValueKey('more_tab'),
+                onPressed: () => tapped = true,
+                child: const Text('More'),
+              ),
+            ),
+            const Center(child: Text('hidden overlay page')),
+          ],
+        ),
+      ));
+
+      final ok =
+          await _pumpAndAwait(tester, () => dispatcher.tap(key: 'more_tab'));
+
+      expect(ok, isTrue);
+      expect(tapped, isTrue);
+      expect(pages.offset, 0.0,
+          reason: 'a tap must not move a PageView the user cannot scroll');
+    });
+
+    testWidgets('does not scroll when the target is already reachable',
+        (tester) async {
+      // A visible target must be tapped where it is: re-aligning it to the
+      // top of its list moves the screen under the test for no reason.
+      final scroll = ScrollController(initialScrollOffset: 300);
+      addTearDown(scroll.dispose);
+      var tapped = false;
+      await tester.pumpWidget(_app(
+        SingleChildScrollView(
+          controller: scroll,
+          child: Column(
+            children: [
+              for (var i = 0; i < 5; i++) const SizedBox(height: 100),
+              ElevatedButton(
+                key: const ValueKey('visible'),
+                onPressed: () => tapped = true,
+                child: const Text('Visible'),
+              ),
+              for (var i = 0; i < 20; i++) const SizedBox(height: 100),
+            ],
+          ),
+        ),
+      ));
+
+      final ok =
+          await _pumpAndAwait(tester, () => dispatcher.tap(key: 'visible'));
+
+      expect(ok, isTrue);
+      expect(tapped, isTrue);
+      expect(scroll.offset, 300.0,
+          reason: 'an already-visible target needs no scrolling');
+    });
+
+    testWidgets(
+        'scrolls only the user-scrollable ancestor to reach an off-screen '
+        'target', (tester) async {
+      final pages = PageController();
+      final scroll = ScrollController();
+      addTearDown(pages.dispose);
+      addTearDown(scroll.dispose);
+      var tapped = false;
+      await tester.pumpWidget(_app(
+        PageView(
+          controller: pages,
+          physics: const NeverScrollableScrollPhysics(),
+          children: [
+            SingleChildScrollView(
+              controller: scroll,
+              child: Column(
+                children: [
+                  for (var i = 0; i < 20; i++) const SizedBox(height: 100),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: ElevatedButton(
+                      key: const ValueKey('deep_right'),
+                      onPressed: () => tapped = true,
+                      child: const Text('Deep'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Center(child: Text('hidden overlay page')),
+          ],
+        ),
+      ));
+
+      final ok =
+          await _pumpAndAwait(tester, () => dispatcher.tap(key: 'deep_right'));
+
+      expect(ok, isTrue);
+      expect(tapped, isTrue);
+      expect(scroll.offset, greaterThan(0),
+          reason: 'the vertical list must scroll to reveal the target');
+      expect(pages.offset, 0.0,
+          reason: 'the locked PageView must stay put');
+    });
+
     testWidgets('confirms a target reached via a descendant hit',
         (tester) async {
       // The key is on the outer GestureDetector; the pointer actually
