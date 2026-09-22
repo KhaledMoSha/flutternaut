@@ -444,10 +444,289 @@ void main() {
       );
     });
 
-    testWidgets('longPress returns false', (tester) async {
+    testWidgets('longPress throws ActionFailure', (tester) async {
       await tester.pumpWidget(_app(const Text('Hi')));
-      final ok = await dispatcher.longPress(key: 'missing');
-      expect(ok, isFalse);
+      await expectLater(
+        dispatcher.longPress(key: 'missing'),
+        throwsA(isA<ActionFailure>()),
+      );
+    });
+  });
+
+  group('route transitions', () {
+    testWidgets('a tap during a route pop fails loudly instead of landing '
+        'on nothing', (tester) async {
+      var tapped = false;
+      final nav = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: nav,
+        home: Scaffold(
+          body: TextButton(
+            onPressed: () => tapped = true,
+            child: const Text('Sort'),
+          ),
+        ),
+      ));
+      nav.currentState!.push(MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('second')),
+      ));
+      await tester.pumpAndSettle();
+
+      // Pop and act while the outgoing route is still sliding away: every
+      // route scope ignores pointers, so the framework would drop the tap.
+      nav.currentState!.pop();
+      await tester.pump(const Duration(milliseconds: 30));
+
+      await expectLater(
+        dispatcher.tap(text: 'Sort'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('route transition'), contains('wait_idle')),
+        )),
+      );
+      expect(tapped, isFalse);
+
+      await tester.pumpAndSettle();
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Sort'));
+      expect(tapped, isTrue, reason: 'after the transition the tap lands');
+    });
+  });
+
+  group('nth for duplicate text/key/semantics locators', () {
+    Widget dups(List<String> taps) => _app(Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            GestureDetector(
+              onTap: () => taps.add('top'),
+              child: const Text('Sign Up'),
+            ),
+            GestureDetector(
+              onTap: () => taps.add('bottom'),
+              child: const Text('Sign Up'),
+            ),
+          ],
+        ));
+
+    testWidgets('nth picks the duplicate in reading order', (tester) async {
+      final taps = <String>[];
+      await tester.pumpWidget(dups(taps));
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.tap(text: 'Sign Up', nth: 1),
+      );
+      expect(taps, ['bottom']);
+
+      taps.clear();
+      await tester.pumpWidget(dups(taps));
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.tap(text: 'Sign Up', nth: 0),
+      );
+      expect(taps, ['top']);
+    });
+
+    testWidgets('the ambiguity error tells the author about nth',
+        (tester) async {
+      await tester.pumpWidget(dups([]));
+      await expectLater(
+        dispatcher.tap(text: 'Sign Up'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('Ambiguous'), contains('nth 0'), contains('nth 1'),
+              contains('Pass nth')),
+        )),
+      );
+    });
+
+    testWidgets('nth out of range fails with the visible count',
+        (tester) async {
+      await tester.pumpWidget(dups([]));
+      await expectLater(
+        dispatcher.tap(text: 'Sign Up', nth: 2),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('nth 2 is out of range'), contains('2 matching')),
+        )),
+      );
+    });
+
+    testWidgets('nth 0 on a unique match behaves like no nth', (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(_app(GestureDetector(
+        onTap: () => tapped = true,
+        child: const Text('Only'),
+      )));
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Only', nth: 0));
+      expect(tapped, isTrue);
+    });
+
+    testWidgets('longPress honours nth', (tester) async {
+      final presses = <String>[];
+      await tester.pumpWidget(_app(Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          GestureDetector(
+            onLongPress: () => presses.add('top'),
+            child: const Text('Hold'),
+          ),
+          GestureDetector(
+            onLongPress: () => presses.add('bottom'),
+            child: const Text('Hold'),
+          ),
+        ],
+      )));
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.longPress(text: 'Hold', nth: 1),
+      );
+      expect(presses, ['bottom']);
+    });
+  });
+
+  group('semantics locator', () {
+    testWidgets('taps an IconButton by its tooltip', (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(_app(IconButton(
+        tooltip: 'Close',
+        icon: const Icon(Icons.close),
+        onPressed: () => tapped = true,
+      )));
+      await _pumpAndAwait(tester, () => dispatcher.tap(semantics: 'Close'));
+      expect(tapped, isTrue);
+    });
+
+    testWidgets('falls back to a case-insensitive label match',
+        (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(_app(Tooltip(
+        message: 'Open menu',
+        child: GestureDetector(
+          onTap: () => tapped = true,
+          child: const Icon(Icons.menu),
+        ),
+      )));
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.tap(semantics: 'open menu'),
+      );
+      expect(tapped, isTrue);
+    });
+
+    testWidgets('throws when no widget carries the label', (tester) async {
+      await tester.pumpWidget(_app(const Icon(Icons.close)));
+      await expectLater(
+        dispatcher.tap(semantics: 'Close'),
+        throwsA(isA<ActionFailure>()
+            .having((e) => e.message, 'message', contains('semantics'))),
+      );
+    });
+  });
+
+  group('typing into a focused / hidden field (OTP pattern)', () {
+    // A PinCodeTextField-style widget: the real input is invisible under
+    // a row of digit boxes; tapping a box focuses the hidden field.
+    Widget otp(TextEditingController controller, FocusNode node) =>
+        _app(Stack(
+          children: [
+            Opacity(
+              opacity: 0,
+              child: TextField(
+                key: const ValueKey('otp'),
+                controller: controller,
+                focusNode: node,
+              ),
+            ),
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => node.requestFocus(),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    for (var i = 0; i < 4; i++)
+                      Container(
+                        key: ValueKey('box$i'),
+                        width: 40,
+                        height: 48,
+                        margin: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(border: Border.all()),
+                        child: Center(
+                          child: Text(
+                            i < controller.text.length
+                                ? controller.text[i]
+                                : '',
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ));
+
+    testWidgets('typeFocused writes into the field the app focused',
+        (tester) async {
+      final controller = TextEditingController();
+      final node = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(node.dispose);
+      await tester.pumpWidget(otp(controller, node));
+
+      await _pumpAndAwait(tester, () => dispatcher.tap(key: 'box0'));
+      expect(node.hasFocus, isTrue);
+
+      await _pumpAndAwait(tester, () => dispatcher.typeFocused('1234'));
+      expect(controller.text, '1234');
+    });
+
+    testWidgets('typeFocused fails loudly when nothing is focused',
+        (tester) async {
+      await tester.pumpWidget(_app(const Text('static')));
+      await expectLater(
+        dispatcher.typeFocused('1'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('No text field has keyboard focus'),
+        )),
+      );
+    });
+
+    testWidgets('typeText into an already-focused hidden field skips the gate',
+        (tester) async {
+      final controller = TextEditingController();
+      final node = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(node.dispose);
+      await tester.pumpWidget(otp(controller, node));
+      node.requestFocus();
+      await tester.pump();
+
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.typeText(key: 'otp', input: '99'),
+      );
+      expect(controller.text, '99');
+    });
+
+    testWidgets('typeText into an unfocused hidden field still fails as '
+        'occluded (the gate is intact)', (tester) async {
+      final controller = TextEditingController();
+      final node = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(node.dispose);
+      await tester.pumpWidget(otp(controller, node));
+
+      await expectLater(
+        dispatcher.typeText(key: 'otp', input: '1'),
+        throwsA(isA<ActionFailure>()
+            .having((e) => e.message, 'message', contains('occluded'))),
+      );
+      expect(controller.text, isEmpty);
     });
   });
 
@@ -736,6 +1015,124 @@ void main() {
       await expectLater(
         dispatcher.swipeAuto('up', 300),
         throwsA(isA<ActionFailure>()),
+      );
+    });
+
+    testWidgets('a same-axis scrollable that cannot move (a nav bar) does '
+        'not make the choice ambiguous', (tester) async {
+      await tester.pumpWidget(_app(Column(
+        children: [
+          Expanded(
+            child: ListView(
+              key: const ValueKey('main'),
+              children: [
+                for (var i = 0; i < 40; i++)
+                  SizedBox(height: 60, child: Text('row $i')),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 56,
+            child: ListView(
+              key: const ValueKey('nav'),
+              children: const [SizedBox(height: 40, child: Text('Home'))],
+            ),
+          ),
+        ],
+      )));
+
+      final chosen = dispatcher.resolveScrollable('up');
+      expect(TreeWalker.keyOf(chosen.widget) ?? '', isNot('nav'));
+      expect(
+        dispatcher.walker.findVisibleScrollables(Axis.vertical),
+        hasLength(2),
+        reason: 'both are visible; only the movable one is a candidate',
+      );
+    });
+
+    testWidgets('fails loudly when no visible scrollable can move that way',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        ListView(
+          children: [for (var i = 0; i < 30; i++) SizedBox(height: 80, child: Text('row $i'))],
+        ),
+      ));
+
+      // A fresh list sits at offset 0: swiping "down" would retreat it,
+      // which is impossible.
+      await expectLater(
+        dispatcher.swipeAuto('down', 300),
+        throwsA(isA<ActionFailure>()
+            .having((e) => e.message, 'message', contains('can scroll'))),
+      );
+    });
+
+    testWidgets('the dominant (largest) list wins over a small movable one',
+        (tester) async {
+      await tester.pumpWidget(_app(Column(
+        children: [
+          Expanded(
+            child: ListView(
+              key: const ValueKey('main'),
+              children: [
+                for (var i = 0; i < 40; i++)
+                  SizedBox(height: 60, child: Text('row $i')),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 80,
+            child: ListView(
+              key: const ValueKey('small'),
+              children: [
+                for (var i = 0; i < 10; i++)
+                  SizedBox(height: 40, child: Text('s $i')),
+              ],
+            ),
+          ),
+        ],
+      )));
+
+      final chosen = dispatcher.resolveScrollable('up');
+      expect(TreeWalker.keyOf(chosen.widget), isNull,
+          reason: 'the chosen element is the inner Scrollable, not the '
+              'keyed ListView wrapper');
+      final center = dispatcher.walker.centerOfElement(chosen)!;
+      expect(center.dy, lessThan(400), reason: 'the main list, not the strip');
+    });
+
+    testWidgets('the ambiguity error names each candidate\'s scrollIndex',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        Row(
+          children: [
+            Expanded(
+              child: ListView(
+                children: [
+                  for (var i = 0; i < 20; i++)
+                    SizedBox(height: 60, child: Text('a$i')),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (var i = 0; i < 20; i++)
+                    SizedBox(height: 60, child: Text('b$i')),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ));
+
+      await expectLater(
+        dispatcher.swipeAuto('up', 300),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('scrollIndex 0'), contains('scrollIndex 1')),
+        )),
       );
     });
 

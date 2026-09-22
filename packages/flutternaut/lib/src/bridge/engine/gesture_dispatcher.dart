@@ -25,12 +25,24 @@ class GestureDispatcher {
   // Public gesture methods (all accept key OR text locators)
   // ---------------------------------------------------------------------------
 
-  /// Taps a widget found by [key] or [text].
+  /// Taps a widget found by [key], [text] or [semantics] (accessibility
+  /// label). When several visible widgets match, [nth] picks one in
+  /// reading order (0-based, rows top→bottom then left→right).
   ///
   /// Throws [ActionFailure] — never silently fails — when the target is
   /// missing, ambiguous, or not visible and tappable. See [resolveActable].
-  Future<bool> tap({String? key, String? text}) async {
-    final center = await resolveActable(key: key, text: text);
+  Future<bool> tap({
+    String? key,
+    String? text,
+    String? semantics,
+    int? nth,
+  }) async {
+    final center = await resolveActable(
+      key: key,
+      text: text,
+      semantics: semantics,
+      nth: nth,
+    );
 
     final session = _beginPointer(center);
     await _pumpFrames();
@@ -115,8 +127,12 @@ class GestureDispatcher {
   /// Goes through the same [resolveActable] confirm pipeline as [tap], so
   /// a substring match that is occluded or off-screen fails loudly rather
   /// than reporting a false success.
-  Future<bool> tapByTextContains(String substring) async {
-    final center = await resolveActable(text: substring, contains: true);
+  Future<bool> tapByTextContains(String substring, {int? nth}) async {
+    final center = await resolveActable(
+      text: substring,
+      contains: true,
+      nth: nth,
+    );
 
     final session = _beginPointer(center);
     await _pumpFrames();
@@ -131,7 +147,8 @@ class GestureDispatcher {
   /// The *field* — not the locator label — is gated for visibility and
   /// tappability (see [_resolveActableField]); a label is only a means of
   /// finding the field. Throws [ActionFailure] when no editable field is
-  /// associated, or it is occluded / off-screen.
+  /// associated, or it is occluded / off-screen. A field that already
+  /// holds keyboard focus is written to without the tap-to-focus.
   Future<bool> typeText({
     String? key,
     String? text,
@@ -139,12 +156,36 @@ class GestureDispatcher {
     bool clear = false,
   }) async {
     final (focusPoint, state) = await _resolveActableField(key: key, text: text);
-    await _focusField(focusPoint);
+    if (focusPoint != null) await _focusField(focusPoint);
+    _writeInto(state, input, clear: clear);
+    return true;
+  }
 
+  /// Types [input] into whichever text field currently holds keyboard
+  /// focus — what the OS keyboard would do. This is the way into inputs
+  /// the app deliberately hides from the pointer (an OTP/PIN widget keeps
+  /// its real `TextField` invisible under a row of digit boxes and focuses
+  /// it when a box is tapped): focus is the app's own proof that the field
+  /// accepts keystrokes, so no hit-test applies. Throws [ActionFailure]
+  /// when no field has focus.
+  Future<bool> typeFocused(String input, {bool clear = false}) async {
+    final state = walker.focusedEditableState();
+    if (state == null) {
+      throw ActionFailure(
+        'No text field has keyboard focus — tap the field (or the control '
+        'that focuses it, e.g. an OTP digit box) first, then type_focused.',
+      );
+    }
+    _writeInto(state, input, clear: clear);
+    return true;
+  }
+
+  /// Drives [input] into [state] through the real input pipeline so
+  /// inputFormatters run and `TextField.onChanged` fires (a plain
+  /// `controller.value =` does not). Appends unless [clear].
+  void _writeInto(EditableTextState state, String input, {required bool clear}) {
     final current = state.textEditingValue.text;
     final newText = clear ? input : current + input;
-    // Drive through the real input pipeline so inputFormatters run and
-    // TextField.onChanged fires (a plain `controller.value =` does not).
     state.userUpdateTextEditingValue(
       TextEditingValue(
         text: newText,
@@ -152,7 +193,6 @@ class GestureDispatcher {
       ),
       SelectionChangedCause.keyboard,
     );
-    return true;
   }
 
   /// Clears the text content of a text field found by [key] or [text].
@@ -162,15 +202,8 @@ class GestureDispatcher {
   /// clearing nothing.
   Future<bool> clearText({String? key, String? text}) async {
     final (focusPoint, state) = await _resolveActableField(key: key, text: text);
-    await _focusField(focusPoint);
-
-    state.userUpdateTextEditingValue(
-      const TextEditingValue(
-        text: '',
-        selection: TextSelection.collapsed(offset: 0),
-      ),
-      SelectionChangedCause.keyboard,
-    );
+    if (focusPoint != null) await _focusField(focusPoint);
+    _writeInto(state, '', clear: true);
     return true;
   }
 
@@ -187,14 +220,23 @@ class GestureDispatcher {
     return true;
   }
 
-  /// Long-presses a widget found by [key] or [text].
+  /// Long-presses a widget found by [key], [text] or [semantics]; [nth]
+  /// disambiguates duplicates in reading order. Goes through the same
+  /// confirm pipeline as [tap] — an occluded or ambiguous target throws
+  /// [ActionFailure] instead of pressing the wrong pixel.
   Future<bool> longPress({
     String? key,
     String? text,
+    String? semantics,
+    int? nth,
     Duration duration = const Duration(milliseconds: 600),
   }) async {
-    final center = _centerOf(_resolve(key: key, text: text));
-    if (center == null) return false;
+    final center = await resolveActable(
+      key: key,
+      text: text,
+      semantics: semantics,
+      nth: nth,
+    );
 
     final session = _beginPointer(center);
     await Future<void>.delayed(duration);
@@ -295,31 +337,95 @@ class GestureDispatcher {
           ? Axis.vertical
           : Axis.horizontal;
 
-  /// Resolves the single visible [Scrollable] to scroll for [direction],
-  /// or throws [ActionFailure]. Direction maps to an axis (up/down →
-  /// vertical, left/right → horizontal); zero matches means there is
-  /// nothing to scroll, and more than one means the choice is ambiguous —
-  /// the author must pass an explicit scroll target rather than have the
-  /// engine guess and scroll the wrong list.
+  /// Resolves the visible [Scrollable] to scroll for [direction], or
+  /// throws [ActionFailure]. Direction maps to an axis (up/down →
+  /// vertical, left/right → horizontal). Among the on-screen scrollables
+  /// on that axis:
+  ///
+  ///  1. only those that can still move in [direction] count — a list
+  ///     already at its end, or a bottom nav bar that never overflows,
+  ///     is not a candidate;
+  ///  2. one remaining candidate wins;
+  ///  3. several: the one with the clearly largest visible area (at least
+  ///     [_dominantAreaRatio]× the runner-up) is the screen's main list
+  ///     and wins; otherwise the choice is genuinely ambiguous and the
+  ///     author must pass a scroll target or `scrollIndex` — listed in
+  ///     the error — rather than have the engine scroll the wrong list.
+  ///
+  /// Never scrolls a random candidate: every choice is either the only
+  /// one that can move or dominant by area, and the alternative is loud.
   Element resolveScrollable(String direction) {
     final axis = _axisForDirection(direction);
     final axisName = axis == Axis.vertical ? 'vertical' : 'horizontal';
 
-    final matches = walker.findVisibleScrollables(axis);
-    if (matches.isEmpty) {
+    final visible = walker.findVisibleScrollables(axis);
+    if (visible.isEmpty) {
       throw ActionFailure(
         'No $axisName scrollable is visible to scroll "$direction" — pass a '
         'scroll target (the scrollable\'s key).',
       );
     }
-    if (matches.length > 1) {
+
+    final movable = visible.where((e) => _canScroll(e, direction)).toList();
+    if (movable.isEmpty) {
       throw ActionFailure(
-        'Ambiguous scroll: ${matches.length} $axisName scrollables are '
-        'visible — ${_describeCandidates(matches)}. Pass a scroll target '
-        '(the scrollable\'s key) to disambiguate.',
+        'None of the ${visible.length} visible $axisName scrollable(s) can '
+        'scroll "$direction" (at the end of its content, or nothing to '
+        'scroll) — ${_describeScrollables(visible, visible)}.',
       );
     }
-    return matches.single;
+    if (movable.length == 1) return movable.single;
+
+    final byArea = [...movable]
+      ..sort((a, b) => _visibleArea(b).compareTo(_visibleArea(a)));
+    final first = _visibleArea(byArea[0]);
+    final second = _visibleArea(byArea[1]);
+    if (second > 0 && first >= second * _dominantAreaRatio) return byArea[0];
+
+    throw ActionFailure(
+      'Ambiguous scroll: ${movable.length} $axisName scrollables are visible '
+      'and can scroll "$direction" — ${_describeScrollables(movable, visible)}. '
+      'Pass a scroll target (the scrollable\'s key) or its scrollIndex to '
+      'disambiguate.',
+    );
+  }
+
+  /// A scrollable must be at least this many times larger (visible area)
+  /// than the next candidate to be chosen as the screen's main list.
+  static const double _dominantAreaRatio = 2.0;
+
+  /// Whether the [Scrollable] element can move further in [direction] —
+  /// it has content dimensions and is not already at the edge the swipe
+  /// pushes it toward. Swiping "up"/"left" advances the scroll offset;
+  /// "down"/"right" retreats it.
+  bool _canScroll(Element scrollable, String direction) {
+    final position = walker.scrollPositionOf(scrollable);
+    if (position == null ||
+        !position.hasPixels ||
+        !position.hasContentDimensions) {
+      return false;
+    }
+    final forward = direction == 'up' || direction == 'left';
+    return forward
+        ? position.pixels < position.maxScrollExtent
+        : position.pixels > position.minScrollExtent;
+  }
+
+  double _visibleArea(Element element) {
+    final rect = walker.rectOfElement(element);
+    return rect == null ? 0 : rect.width * rect.height;
+  }
+
+  /// Describes scrollable candidates with the `scrollIndex` a caller can
+  /// pass back — the index into [all], the same DFS order as the `/screen`
+  /// dump — so an ambiguity error is directly actionable.
+  String _describeScrollables(List<Element> shown, List<Element> all) {
+    return shown.map((e) {
+      final index = all.indexOf(e);
+      final rect = walker.rectOfElement(e);
+      final rectPart = rect != null ? ' @ ${_fmtRect(rect)}' : '';
+      return '[scrollIndex $index ${e.widget.runtimeType}$rectPart]';
+    }).join(', ');
   }
 
   /// Swipes between two absolute screen coordinates.
@@ -379,26 +485,36 @@ class GestureDispatcher {
   /// reporting success when nothing — or the wrong widget — was hit.
   ///
   /// Pipeline:
-  ///   1. Resolve every element matching [key] or [text] (exact, unless
-  ///      [contains] for the text-substring path).
+  ///   1. Resolve every element matching [key], [text] (exact, unless
+  ///      [contains] for the text-substring path) or [semantics].
   ///   2. Single match → scroll it into view (best-effort), settle, then
   ///      confirm it is genuinely tappable via a real hit-test.
   ///   3. Multiple matches → only those currently on-screen AND hittable
-  ///      count. Exactly one wins; zero → fail (nothing visible to act
-  ///      on); two or more → fail as ambiguous, listing the candidates.
+  ///      count, ordered in reading order. With [nth], that index wins
+  ///      (out of range → fail, naming the count). Without it, exactly
+  ///      one must remain; zero → fail (nothing visible to act on); two
+  ///      or more → fail as ambiguous, listing the candidates with the
+  ///      `nth` each one would take.
   Future<Offset> resolveActable({
     String? key,
     String? text,
+    String? semantics,
     bool contains = false,
+    int? nth,
   }) async {
-    final desc = _describeLocator(key: key, text: text);
-    final matches = _matchingElements(key: key, text: text, contains: contains);
+    final desc = _describeLocator(key: key, text: text, semantics: semantics);
+    final matches = _matchingElements(
+      key: key,
+      text: text,
+      semantics: semantics,
+      contains: contains,
+    );
 
     if (matches.isEmpty) {
       throw ActionFailure('No element found matching $desc.');
     }
 
-    if (matches.length == 1) {
+    if (matches.length == 1 && (nth == null || nth == 0)) {
       final element = matches.single;
       await _ensureVisible(element);
       return _confirmHittable(element, desc);
@@ -408,8 +524,10 @@ class GestureDispatcher {
     // tappable right now — duplicates that are off-screen or hidden are not
     // real conflicts. Uses the same tappability policy as the single-match
     // path (strict for interactive targets, lenient for plain labels).
+    // Reading order makes `nth` stable and identical to the numbering the
+    // engine catalog shows next to duplicate labels.
     final visible = <(Element, Offset)>[];
-    for (final element in matches) {
+    for (final element in walker.inReadingOrder(matches)) {
       final point = walker.reachableTapPoint(element);
       if (point != null) {
         visible.add((element, point));
@@ -423,11 +541,24 @@ class GestureDispatcher {
         'with a ValueKey.',
       );
     }
+    if (nth != null) {
+      if (nth < 0 || nth >= visible.length) {
+        throw ActionFailure(
+          'nth $nth is out of range for $desc: ${visible.length} matching '
+          'element(s) are visible and tappable — '
+          '${_describeCandidates([for (final v in visible) v.$1], numbered: true)}.',
+        );
+      }
+      return visible[nth].$2;
+    }
     if (visible.length > 1) {
-      final candidates = _describeCandidates([for (final v in visible) v.$1]);
+      final candidates =
+          _describeCandidates([for (final v in visible) v.$1], numbered: true);
       throw ActionFailure(
         'Ambiguous locator $desc: ${visible.length} matching elements are '
-        'visible and tappable — $candidates. Disambiguate with a ValueKey.',
+        'visible and tappable — $candidates. Pass nth (0-based, reading '
+        'order: rows top to bottom, then left to right) or disambiguate '
+        'with a ValueKey.',
       );
     }
     return visible.single.$2;
@@ -441,7 +572,12 @@ class GestureDispatcher {
   /// Unlike [tap], the gate is applied to the *field*, since a label
   /// locator (e.g. `InputDecoration.labelText`) is not itself the
   /// interactive target — it merely identifies the field to type into.
-  Future<(Offset, EditableTextState)> _resolveActableField({
+  ///
+  /// A field that already holds keyboard focus skips the gate and the
+  /// focus tap (the returned point is null): the app focused it, so it
+  /// accepts keystrokes wherever its pixels are — this is how a hidden
+  /// OTP input, focused by tapping its visible digit box, is typed into.
+  Future<(Offset?, EditableTextState)> _resolveActableField({
     String? key,
     String? text,
   }) async {
@@ -458,6 +594,7 @@ class GestureDispatcher {
         '$desc resolved to a widget that is not an editable text field.',
       );
     }
+    if (state.widget.focusNode.hasFocus) return (null, state);
 
     await _ensureVisible(element);
     return (_confirmHittable(element, desc), state);
@@ -476,6 +613,7 @@ class GestureDispatcher {
   List<Element> _matchingElements({
     String? key,
     String? text,
+    String? semantics,
     bool contains = false,
   }) {
     if (key != null) return walker.findAllElementsByKey(key);
@@ -484,6 +622,7 @@ class GestureDispatcher {
           ? walker.findAllElementsByTextContains(text)
           : walker.findAllElementsByText(text);
     }
+    if (semantics != null) return walker.findAllElementsBySemantics(semantics);
     return const [];
   }
 
@@ -497,6 +636,14 @@ class GestureDispatcher {
     if (center == null) {
       throw ActionFailure(
         '$desc exists but has no on-screen geometry (not laid out).',
+      );
+    }
+    if (walker.pointersIgnoredAt(element, center)) {
+      throw ActionFailure(
+        '$desc is present at ${_fmtOffset(center)} but no widget receives '
+        'pointers there right now: a route transition is in progress and '
+        'Flutter ignores pointer events until it ends. Run wait_idle, then '
+        'retry.',
       );
     }
     final blocker = walker.topmostHitTypeAt(element, center);
@@ -557,21 +704,26 @@ class GestureDispatcher {
     if (scrolled) await _pumpFrames(count: 3);
   }
 
-  String _describeLocator({String? key, String? text}) {
+  String _describeLocator({String? key, String? text, String? semantics}) {
     if (key != null) return 'key "$key"';
     if (text != null) return 'text "$text"';
+    if (semantics != null) return 'semantics "$semantics"';
     return 'locator';
   }
 
-  String _describeCandidates(List<Element> elements) {
+  /// Describes candidate elements; [numbered] prefixes each with the
+  /// `nth` it would take, in the order given (callers pass reading order).
+  String _describeCandidates(List<Element> elements, {bool numbered = false}) {
+    var i = 0;
     return elements.map((e) {
-      final key = e.widget.key;
-      final keyPart = key is ValueKey ? ' key "${key.value}"' : '';
+      final key = TreeWalker.keyOf(e.widget);
+      final keyPart = key != null ? ' key "$key"' : '';
       final label = walker.textOfElement(e);
       final labelPart = label != null ? ' "$label"' : '';
       final rect = walker.rectOfElement(e);
       final rectPart = rect != null ? ' @ ${_fmtRect(rect)}' : '';
-      return '[${e.widget.runtimeType}$keyPart$labelPart$rectPart]';
+      final nthPart = numbered ? 'nth ${i++} ' : '';
+      return '[$nthPart${e.widget.runtimeType}$keyPart$labelPart$rectPart]';
     }).join(', ');
   }
 

@@ -22,6 +22,7 @@ class GestureHandler {
   void register(BridgeRouter router) {
     router.post('/tap', _tap);
     router.post('/type', _type);
+    router.post('/type_focused', _typeFocused);
     router.post('/clear_text', _clearText);
     router.post('/scroll', _scroll);
     router.post('/long_press', _longPress);
@@ -31,15 +32,21 @@ class GestureHandler {
     router.post('/fling', _fling);
   }
 
-  /// Taps an element located by `key` or `text`, or — for icon-only
-  /// controls with no key and no text — by `near` + `nth`: the nth
-  /// unlabeled interactive control (left-to-right) in the row of the
-  /// unique on-screen text `near`.
+  /// Taps an element located by `key`, `text` or `semantics` (an
+  /// accessibility label: `Icon.semanticLabel`, `IconButton.tooltip`,
+  /// `Tooltip.message`, `Semantics.label`), or — for icon-only controls
+  /// with none of those — by `near` + `nth`: the nth unlabeled
+  /// interactive control (left-to-right) in the row of the unique
+  /// on-screen text `near`.
   ///
   /// `match` (text targeting only): `"exact"` (default) requires the
   /// visible text to equal `text`; `"contains"` matches any widget
   /// whose visible text contains `text` as a substring — useful for
   /// rich/partial labels.
+  ///
+  /// `nth` (key/text/semantics targeting): when several visible widgets
+  /// match, picks one in reading order (0-based); without it a duplicate
+  /// label is an ambiguity failure.
   Future<Map<String, dynamic>> _tap(BridgeRequest req) async {
     final near = req.string('near');
     if (near != null) {
@@ -55,20 +62,45 @@ class GestureHandler {
     req.requireLocator();
     final key = req.string('key');
     final text = req.string('text');
+    final semantics = req.string('semantics');
     final match = req.string('match') ?? 'exact';
+    final nth = _optionalNth(req);
 
     final success = await _runner.run(() {
       if (key == null && text != null && match == 'contains') {
-        return _gesture.tapByTextContains(text);
+        return _gesture.tapByTextContains(text, nth: nth);
       }
-      return _gesture.tap(key: key, text: text);
+      return _gesture.tap(
+        key: key,
+        text: text,
+        semantics: semantics,
+        nth: nth,
+      );
     });
     return ActionResult(
       action: 'tap',
       success: success,
-      extras: _locatorEcho(key, text),
+      extras: _locatorEcho(key, text, semantics, nth),
     ).toJson();
   }
+
+  /// Types `text` into the field that currently holds keyboard focus —
+  /// the keystroke path for inputs the app hides from the pointer (OTP /
+  /// PIN widgets). Fails when nothing is focused.
+  Future<Map<String, dynamic>> _typeFocused(BridgeRequest req) async {
+    final input = req.string('text');
+    if (input == null) throw ArgumentError('Missing "text" field');
+    final clear = req.boolean('clear');
+    final success = await _runner.run(
+      () => _gesture.typeFocused(input, clear: clear),
+    );
+    return ActionResult(action: 'type_focused', success: success).toJson();
+  }
+
+  /// `nth` when the body carries one, else null (absent means "must be
+  /// unique"; an explicit 0 is a real choice and is kept).
+  int? _optionalNth(BridgeRequest req) =>
+      req.body.containsKey('nth') ? req.integer('nth') : null;
 
   Future<Map<String, dynamic>> _type(BridgeRequest req) async {
     final key = req.string('key');
@@ -132,14 +164,24 @@ class GestureHandler {
     }
 
     req.requireLocator();
+    final key = req.string('key');
+    final text = req.string('text');
+    final semantics = req.string('semantics');
+    final nth = _optionalNth(req);
     final success = await _runner.run(
       () => _gesture.longPress(
-        key: req.string('key'),
-        text: req.string('text'),
+        key: key,
+        text: text,
+        semantics: semantics,
+        nth: nth,
         duration: duration,
       ),
     );
-    return ActionResult(action: 'long_press', success: success).toJson();
+    return ActionResult(
+      action: 'long_press',
+      success: success,
+      extras: _locatorEcho(key, text, semantics, nth),
+    ).toJson();
   }
 
   Future<Map<String, dynamic>> _multiTap(BridgeRequest req) async {
@@ -284,12 +326,20 @@ class GestureHandler {
     return info?.rect?.center;
   }
 
-  /// Returns `{key: ..., text: ...}` map echoing back the locator, or null.
-  Map<String, dynamic>? _locatorEcho(String? key, String? text) {
-    if (key == null && text == null) return null;
+  /// Returns a map echoing back the locator (and `nth` when given), or
+  /// null when there is nothing to echo.
+  Map<String, dynamic>? _locatorEcho(
+    String? key,
+    String? text, [
+    String? semantics,
+    int? nth,
+  ]) {
+    if (key == null && text == null && semantics == null) return null;
     return {
       if (key != null) 'key': key,
       if (text != null) 'text': text,
+      if (semantics != null) 'semantics': semantics,
+      if (nth != null) 'nth': nth,
     };
   }
 

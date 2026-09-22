@@ -52,13 +52,17 @@ class BridgeRequest {
     return null;
   }
 
-  /// Whether the body contains at least one element locator (`key` or `text`).
-  bool get hasLocator => string('key') != null || string('text') != null;
+  /// Whether the body contains at least one element locator (`key`, `text`
+  /// or `semantics`).
+  bool get hasLocator =>
+      string('key') != null ||
+      string('text') != null ||
+      string('semantics') != null;
 
-  /// Throws [ArgumentError] if neither `key` nor `text` is present.
+  /// Throws [ArgumentError] if no locator field is present.
   void requireLocator() {
     if (!hasLocator) {
-      throw ArgumentError('Missing "key" or "text" field');
+      throw ArgumentError('Missing "key", "text" or "semantics" field');
     }
   }
 

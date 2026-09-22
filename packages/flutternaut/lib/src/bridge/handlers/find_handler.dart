@@ -1,6 +1,7 @@
 import '../engine/main_thread_runner.dart';
 import '../engine/tree_walker.dart';
 import '../router.dart';
+import '_locator.dart';
 
 /// Handles element finding endpoints.
 class FindHandler {
@@ -22,15 +23,16 @@ class FindHandler {
     req.requireLocator();
     final key = req.string('key');
     final text = req.string('text');
+    final semantics = req.string('semantics');
 
     return _runner.run(() {
-      final info =
-          key != null ? _walker.findByKey(key) : _walker.findByText(text!);
+      final info = resolveLocator(req, _walker);
       if (info != null) return info.toJson();
       return {
         'found': false,
         if (key != null) 'key': key,
         if (text != null) 'text': text,
+        if (semantics != null) 'semantics': semantics,
       };
     });
   }

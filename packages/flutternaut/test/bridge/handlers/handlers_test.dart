@@ -35,9 +35,9 @@ void main() {
       expect(router.routeCount, 2);
     });
 
-    test('GestureHandler registers 9 routes', () {
+    test('GestureHandler registers 10 routes', () {
       GestureHandler(gesture: gesture, runner: runner).register(router);
-      expect(router.routeCount, 9);
+      expect(router.routeCount, 10);
     });
 
     test('QueryHandler registers 4 routes', () {
@@ -70,8 +70,8 @@ void main() {
     WaitHandler(walker: walker, runner: runner).register(router);
     AppHandler(runner: runner).register(router);
 
-    // Total: 4 + 2 + 9 + 4 + 8 + 5 + 1 = 33. If any duplicate path existed,
+    // Total: 4 + 2 + 10 + 4 + 8 + 5 + 1 = 34. If any duplicate path existed,
     // the Map in BridgeRouter would collapse them and the count would be less.
-    expect(router.routeCount, 33);
+    expect(router.routeCount, 34);
   });
 }

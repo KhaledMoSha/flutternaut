@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/scheduler.dart';
-
 import '../engine/main_thread_runner.dart';
 import '../engine/tree_walker.dart';
 import '../models/wait_result.dart';
@@ -62,9 +60,13 @@ class WaitHandler {
     return result.toJson();
   }
 
+  /// Waits until no widget-driven animation is running (see
+  /// [TreeWalker.isAnimating]) — every route, drawer, sheet and page
+  /// transition has finished. A blinking caret or an ink ripple does not
+  /// count; a spinner does.
   Future<Map<String, dynamic>> _waitForIdle(BridgeRequest req) async {
     final result = await _poll(
-      () => !SchedulerBinding.instance.hasScheduledFrame,
+      () => !_walker.isAnimating,
       timeoutMs: req.integer('timeout_ms', defaultValue: 10000),
       intervalMs: 50,
     );

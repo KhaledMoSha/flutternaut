@@ -4,6 +4,7 @@ import 'package:flutternaut/flutternaut.dart';
 import 'control_flow_screen.dart';
 import 'device_screen.dart';
 import 'gestures_screen.dart';
+import 'otp_screen.dart';
 
 class TodoItem {
   String text;
@@ -49,6 +50,19 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  String _sortedBy = '';
+
+  void _sortBy(String what) {
+    setState(() {
+      _sortedBy = 'sorted by $what';
+      if (what == 'text') {
+        _todos.sort((a, b) => a.text.compareTo(b.text));
+      } else {
+        _todos.sort((a, b) => (a.completed ? 1 : 0) - (b.completed ? 1 : 0));
+      }
+    });
+  }
+
   @override
   void dispose() {
     _todoController.dispose();
@@ -58,10 +72,43 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // A side navigation: the animating scrim right after it opens is what
+      // makes a mid-transition screen read come back empty.
+      drawer: Drawer(
+        child: ListView(
+          children: [
+            const DrawerHeader(child: Text('Menu')),
+            ListTile(
+              leading: const Icon(Icons.pin),
+              title: const Text('Enter code'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const OtpScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('About'),
+              onTap: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      ),
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text('My Todos'),
-        automaticallyImplyLeading: false,
+        // The drawer's menu button: no key, only a tooltip — addressable by
+        // its accessibility label.
+        leading: Builder(
+          builder: (context) => IconButton(
+            tooltip: 'Open menu',
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
         actions: [
           IconButton(
             key: const ValueKey('gestures_button'),
@@ -134,6 +181,26 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          // Two controls with the same label — a duplicate a test must pick
+          // from by nth (reading order: left first).
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                TextButton(
+                  onPressed: () => _sortBy('text'),
+                  child: const Text('Sort'),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => _sortBy('done'),
+                  child: const Text('Sort'),
+                ),
+                const Spacer(),
+                Text(_sortedBy, key: const ValueKey('sorted_by')),
+              ],
+            ),
+          ),
           Expanded(
             child: ListView.builder(
               itemCount: _todos.length,

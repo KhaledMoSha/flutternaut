@@ -1,4 +1,6 @@
 // ignore_for_file: deprecated_member_use
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -1084,4 +1086,227 @@ void main() {
       expect(node['axis'], 'vertical');
     });
   });
+
+  group('keys, semantics, animating and empty fields in the dump', () {
+    List<Map<String, dynamic>> flatten(List<dynamic> elements) {
+      final out = <Map<String, dynamic>>[];
+      for (final e in elements.cast<Map<String, dynamic>>()) {
+        out.add(e);
+        if (e['children'] is List) {
+          out.addAll(flatten(e['children'] as List));
+        }
+      }
+      return out;
+    }
+
+    List<Map<String, dynamic>> nodes() =>
+        flatten(walker.dumpVisibleTree()['elements'] as List);
+
+    test('keyOf accepts scalar ValueKeys and rejects object ones', () {
+      expect(TreeWalker.keyOf(const SizedBox(key: ValueKey('a'))), 'a');
+      expect(TreeWalker.keyOf(const SizedBox(key: ValueKey(3))), '3');
+      expect(TreeWalker.keyOf(const SizedBox(key: ValueKey(true))), 'true');
+      expect(TreeWalker.keyOf(SizedBox(key: ValueKey(Axis.vertical))),
+          'Axis.vertical');
+      expect(
+        TreeWalker.keyOf(
+            SizedBox(key: ValueKey(const NetworkImage('http://x/y.png')))),
+        isNull,
+      );
+      // `Key('x')` is a `ValueKey<String>` and stays addressable.
+      expect(TreeWalker.keyOf(const SizedBox(key: Key('plain'))), 'plain');
+      expect(TreeWalker.keyOf(SizedBox(key: UniqueKey())), isNull);
+    });
+
+    testWidgets('an Image keyed by its ImageProvider has no key in the dump',
+        (tester) async {
+      await tester.pumpWidget(_app(Image(
+        key: ValueKey(MemoryImage(Uint8List.fromList(_kTransparentPng))),
+        image: MemoryImage(Uint8List.fromList(_kTransparentPng)),
+        width: 20,
+        height: 20,
+      )));
+      final image = nodes().firstWhere((n) => n['type'] == 'Image');
+      expect(image.containsKey('key'), isFalse);
+      expect(walker.findByKey('MemoryImage'), isNull);
+    });
+
+    testWidgets('an IconButton carries its tooltip as semantics',
+        (tester) async {
+      await tester.pumpWidget(_app(IconButton(
+        tooltip: 'Close',
+        icon: const Icon(Icons.close),
+        onPressed: () {},
+      )));
+      final button = nodes().firstWhere((n) => n['type'] == 'IconButton');
+      expect(button['semantics'], 'Close');
+    });
+
+    testWidgets('a control wrapped in Tooltip / Semantics inherits the label',
+        (tester) async {
+      await tester.pumpWidget(_app(Column(children: [
+        Tooltip(
+          message: 'Open menu',
+          child: GestureDetector(onTap: () {}, child: const Icon(Icons.menu)),
+        ),
+        Semantics(
+          label: 'Favourite',
+          button: true,
+          child: GestureDetector(onTap: () {}, child: const Icon(Icons.star)),
+        ),
+      ])));
+      final labels = nodes()
+          .where((n) => n['type'] == 'GestureDetector')
+          .map((n) => n['semantics'])
+          .toList();
+      expect(labels, ['Open menu', 'Favourite']);
+    });
+
+    testWidgets('a keyed wrapper does not borrow a nested control\'s label',
+        (tester) async {
+      await tester.pumpWidget(_app(SizedBox(
+        key: const ValueKey('wrap'),
+        child: IconButton(
+          tooltip: 'Open menu',
+          icon: const Icon(Icons.menu),
+          onPressed: () {},
+        ),
+      )));
+      final all = nodes();
+      final wrap = all.firstWhere((n) => n['key'] == 'wrap');
+      expect(wrap.containsKey('semantics'), isFalse);
+      final labelled = all.where((n) => n['semantics'] == 'Open menu');
+      expect(labelled.map((n) => n['type']), ['IconButton']);
+    });
+
+    testWidgets('a gesture wrapper takes its icon\'s semanticLabel',
+        (tester) async {
+      await tester.pumpWidget(_app(GestureDetector(
+        onTap: () {},
+        child: const Icon(Icons.star, semanticLabel: 'Favourite'),
+      )));
+      final gd = nodes().firstWhere((n) => n['type'] == 'GestureDetector');
+      expect(gd['semantics'], 'Favourite');
+    });
+
+    testWidgets('a widget without any accessibility label has no semantics',
+        (tester) async {
+      await tester.pumpWidget(_app(ElevatedButton(
+        onPressed: () {},
+        child: const Text('Plain'),
+      )));
+      final button = nodes().firstWhere((n) => n['type'] == 'ElevatedButton');
+      expect(button.containsKey('semantics'), isFalse);
+    });
+
+    testWidgets('animating is false on a settled screen and true while an '
+        'animation runs', (tester) async {
+      await tester.pumpWidget(_app(const Text('still')));
+      expect(walker.dumpVisibleTree()['animating'], isFalse);
+
+      final controller = AnimationController(
+        vsync: tester,
+        duration: const Duration(seconds: 2),
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(_app(FadeTransition(
+        opacity: controller,
+        child: const Text('fading'),
+      )));
+      controller.forward();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(walker.isAnimating, isTrue);
+      expect(walker.dumpVisibleTree()['animating'], isTrue);
+
+      await tester.pumpAndSettle();
+      expect(walker.dumpVisibleTree()['animating'], isFalse);
+    });
+
+    testWidgets('a focused field (blinking caret) and a spinner-free screen '
+        'are not animating', (tester) async {
+      final node = FocusNode();
+      addTearDown(node.dispose);
+      await tester.pumpWidget(_app(TextField(focusNode: node)));
+      node.requestFocus();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(walker.isAnimating, isFalse,
+          reason: 'the caret blink must not count as an animation');
+    });
+
+    testWidgets('an AnimatedBuilder driven by a running controller (the '
+        'drawer\'s mechanism) is animating, then settles', (tester) async {
+      final controller = AnimationController(
+        vsync: tester,
+        duration: const Duration(milliseconds: 300),
+      );
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(_app(AnimatedBuilder(
+        animation: controller,
+        builder: (context, child) => Align(
+          alignment: Alignment.centerLeft,
+          widthFactor: 0.5 + controller.value / 2,
+          child: const SizedBox(width: 200, height: 50),
+        ),
+      )));
+      expect(walker.isAnimating, isFalse);
+      controller.forward();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(walker.isAnimating, isTrue, reason: 'mid-flight');
+      await tester.pumpAndSettle();
+      expect(walker.isAnimating, isFalse);
+    });
+
+    testWidgets('an empty unkeyed TextField is one node, not two',
+        (tester) async {
+      await tester.pumpWidget(_app(const TextField()));
+      final fields = nodes()
+          .where((n) => n['type'] == 'TextField' || n['type'] == 'EditableText')
+          .toList();
+      expect(fields.map((n) => n['type']), ['TextField']);
+    });
+
+    testWidgets('an empty bare EditableText (no TextField) still appears',
+        (tester) async {
+      final controller = TextEditingController();
+      final node = FocusNode();
+      addTearDown(controller.dispose);
+      addTearDown(node.dispose);
+      await tester.pumpWidget(_app(EditableText(
+        controller: controller,
+        focusNode: node,
+        style: const TextStyle(),
+        cursorColor: Colors.black,
+        backgroundCursorColor: Colors.grey,
+      )));
+      final editable = nodes().where((n) => n['type'] == 'EditableText');
+      expect(editable, hasLength(1));
+    });
+
+    testWidgets('findBySemantics resolves an Icon by its semanticLabel',
+        (tester) async {
+      await tester.pumpWidget(
+          _app(const Icon(Icons.warning, semanticLabel: 'Warning')));
+      expect(walker.findBySemantics('Warning')?.type, 'Icon');
+      expect(walker.findBySemantics('warning')?.type, 'Icon');
+      expect(walker.findBySemantics('Nope'), isNull);
+    });
+
+    testWidgets('checkTextContainsVisible matches part of a label',
+        (tester) async {
+      await tester.pumpWidget(_app(const Text('Start 7-Day Free Trial')));
+      expect(walker.checkTextContainsVisible('free trial').visible, isTrue);
+      expect(walker.checkTextVisible('Free Trial').exists, isFalse);
+    });
+  });
 }
+
+/// A 1x1 transparent PNG (67 bytes) for image tests.
+const _kTransparentPng = <int>[
+  0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, //
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, //
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, //
+  0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, //
+  0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, //
+  0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82, //
+];

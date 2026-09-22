@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -14,12 +15,161 @@ class TreeWalker {
   // Finding
   // ---------------------------------------------------------------------------
 
+  /// The addressable key string of [widget], or null when it has none.
+  ///
+  /// Only a [ValueKey] whose value is a plain scalar — [String], [num],
+  /// [bool] or an enum — is a locator a test can be written against.
+  /// Packages routinely key widgets with objects (`octo_image` keys its
+  /// `Image` with the `ImageProvider`, which stringifies to
+  /// `ResizeImage(CachedNetworkImageProvider(...))`): those strings are
+  /// noise in a screen readout and unstable as locators, so they do not
+  /// count as keys anywhere in the bridge.
+  static String? keyOf(Widget widget) {
+    final key = widget.key;
+    if (key is! ValueKey) return null;
+    final value = key.value;
+    if (value is String || value is num || value is bool || value is Enum) {
+      return value.toString();
+    }
+    return null;
+  }
+
   /// Finds the first element whose [ValueKey] value matches [keyValue].
   ElementInfo? findByKey(String keyValue) {
-    return _findWhere((element) {
-      final key = element.widget.key;
-      return key is ValueKey && key.value.toString() == keyValue;
+    return _findWhere((element) => keyOf(element.widget) == keyValue);
+  }
+
+  /// The accessibility label a widget carries for itself: an [Icon]'s
+  /// `semanticLabel`, an [IconButton]'s `tooltip`, a [Tooltip]'s
+  /// `message`, or a [Semantics] `label`. Null when [widget] declares
+  /// none. This is what makes an icon-only control readable in the
+  /// screen dump and addressable with the `semantics` locator.
+  static String? ownSemanticsOf(Widget widget) {
+    String? label;
+    if (widget is Icon) {
+      label = widget.semanticLabel;
+    } else if (widget is IconButton) {
+      label = widget.tooltip;
+    } else if (widget is Tooltip) {
+      label = widget.message;
+    } else if (widget is Semantics) {
+      label = widget.properties.label ?? widget.properties.tooltip;
+    }
+    final trimmed = label?.trim();
+    return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+  }
+
+  /// The accessibility label to attach to a dump node: the element's own
+  /// ([ownSemanticsOf]), else the first one declared in its subtree without
+  /// crossing into a nested control (a `GestureDetector` around an
+  /// `Icon(semanticLabel:)` takes the icon's label; a wrapper around an
+  /// `IconButton` does not take the button's tooltip), else
+  /// one declared by a close ancestor (`Tooltip(message:, child: button)`
+  /// wraps the control it describes — through a few internal widgets of
+  /// its own). The ancestor walk stops at another control or scroll view
+  /// so a label is never borrowed from an unrelated container.
+  String? semanticsOf(Element element) {
+    final own = ownSemanticsOf(element.widget);
+    if (own != null) return own;
+
+    String? found;
+    void visit(Element child) {
+      if (found != null) return;
+      // A descendant that is a control of its own keeps its label: a slot
+      // or wrapper around an IconButton must not be listed as "Open menu"
+      // next to the button itself.
+      final w = child.widget;
+      if (_isButtonLike(w) || _extractEnabled(w) != null) return;
+      found = ownSemanticsOf(w);
+      if (found != null) return;
+      child.visitChildren(visit);
+    }
+
+    element.visitChildren(visit);
+    if (found != null) return found;
+
+    var hops = 0;
+    element.visitAncestorElements((ancestor) {
+      final w = ancestor.widget;
+      if (_isButtonLike(w) || w is Scrollable || w is EditableText) {
+        return false;
+      }
+      found = ownSemanticsOf(w);
+      if (found != null) return false;
+      hops++;
+      return hops < _semanticsAncestorHops;
     });
+    return found;
+  }
+
+  /// How far up [semanticsOf] looks for a wrapping label. `Tooltip` places
+  /// its child under a `Semantics` + mouse region + `Listener` of its own,
+  /// so the describing widget is typically 3–5 elements above the control.
+  static const int _semanticsAncestorHops = 6;
+
+  /// Finds the first element whose own accessibility label
+  /// ([ownSemanticsOf]) equals [label] exactly, else — so a test written
+  /// against a tooltip survives a capitalisation change — the first whose
+  /// label equals it case-insensitively.
+  ElementInfo? findBySemantics(String label) {
+    final el = findElementBySemantics(label);
+    return el == null ? null : extractInfo(el);
+  }
+
+  /// The [Element] version of [findBySemantics].
+  Element? findElementBySemantics(String label) {
+    final exact = _findElementWhere(
+      (e) => ownSemanticsOf(e.widget) == label,
+    );
+    if (exact != null) return exact;
+    final needle = label.toLowerCase();
+    return _findElementWhere(
+      (e) => ownSemanticsOf(e.widget)?.toLowerCase() == needle,
+    );
+  }
+
+  /// Every element whose own accessibility label equals [label]
+  /// (exact first; case-insensitive when nothing matches exactly). Used
+  /// by the tap/long-press confirm pipeline for ambiguity detection.
+  List<Element> findAllElementsBySemantics(String label) {
+    final exact = _findAllElementsWhere(
+      (e) => ownSemanticsOf(e.widget) == label,
+    );
+    if (exact.isNotEmpty) return exact;
+    final needle = label.toLowerCase();
+    return _findAllElementsWhere(
+      (e) => ownSemanticsOf(e.widget)?.toLowerCase() == needle,
+    );
+  }
+
+  /// The [EditableTextState] of the text field that currently holds
+  /// keyboard focus, or null when no field is focused. A field the app
+  /// itself focused (an OTP widget whose real input sits hidden under
+  /// its digit boxes) is typed into through this, exactly as the OS
+  /// keyboard would deliver keystrokes to it — no hit-test is involved
+  /// because the app's own focus is the proof the field accepts input.
+  EditableTextState? focusedEditableState() {
+    final root = WidgetsBinding.instance.rootElement;
+    if (root == null) return null;
+
+    EditableTextState? primary;
+    EditableTextState? withinScope;
+    void visit(Element element) {
+      if (primary != null) return;
+      if (element is StatefulElement && element.state is EditableTextState) {
+        final state = element.state as EditableTextState;
+        final node = state.widget.focusNode;
+        if (node.hasPrimaryFocus) {
+          primary = state;
+          return;
+        }
+        withinScope ??= node.hasFocus ? state : null;
+      }
+      element.visitChildren(visit);
+    }
+
+    root.visitChildren(visit);
+    return primary ?? withinScope;
   }
 
   /// The element's own visible text — plain [Text], `Text.rich`
@@ -141,10 +291,7 @@ class TreeWalker {
 
   /// Finds the first [Element] whose [ValueKey] value matches [keyValue].
   Element? findElementByKey(String keyValue) {
-    return _findElementWhere((element) {
-      final key = element.widget.key;
-      return key is ValueKey && key.value.toString() == keyValue;
-    });
+    return _findElementWhere((element) => keyOf(element.widget) == keyValue);
   }
 
   /// Finds the first [Element] whose own visible text equals [text]
@@ -157,10 +304,9 @@ class TreeWalker {
   /// detect ambiguous locators; more than one on-screen, hittable match
   /// is a fatal authoring error.
   List<Element> findAllElementsByKey(String keyValue) {
-    return _findAllElementsWhere((element) {
-      final key = element.widget.key;
-      return key is ValueKey && key.value.toString() == keyValue;
-    });
+    return _findAllElementsWhere(
+      (element) => keyOf(element.widget) == keyValue,
+    );
   }
 
   /// Every text-bearing [Element] whose own visible text equals [text]
@@ -240,6 +386,19 @@ class TreeWalker {
     return _readingOrder(candidates).map((c) => c.el).toList();
   }
 
+  /// [elements] sorted in reading order — the same rows-then-columns rule
+  /// as the `near` locator ([_readingOrder]) and the engine catalog — so an
+  /// `nth` recorded against duplicate text resolves to the same widget the
+  /// catalog numbered. Elements without laid-out geometry are dropped.
+  List<Element> inReadingOrder(List<Element> elements) {
+    final items = <({ElementRect rect, Element el})>[];
+    for (final el in elements) {
+      final rect = _rectOf(el);
+      if (rect != null) items.add((rect: rect, el: el));
+    }
+    return _readingOrder(items).map((c) => c.el).toList();
+  }
+
   /// Orders rect-bearing items in reading order: group into rows (an item
   /// joins the current row while its y-center is within [_kNearRowTolerance]
   /// of the row's first item), rows top→bottom, items left→right within a row.
@@ -292,7 +451,7 @@ class TreeWalker {
   /// private-use character through an internal [RichText], so an icon-only
   /// button does carry text — just not text a human (or locator) can use.
   bool _isUnlabeledInteractiveShell(Element element, Size? screen) {
-    if (element.widget.key is ValueKey) return false;
+    if (keyOf(element.widget) != null) return false;
     if (_nodeEnabled(element) == null) return false;
     final text = _nodeText(element);
     if (text != null && _hasAlnum(text)) return false;
@@ -342,7 +501,7 @@ class TreeWalker {
 
     final results = <ElementInfo>[];
     void visitor(Element element) {
-      if (element.widget.key is ValueKey) {
+      if (keyOf(element.widget) != null) {
         results.add(extractInfo(element));
       }
       element.visitChildren(visitor);
@@ -368,6 +527,81 @@ class TreeWalker {
   /// (see [checkTextVisible]).
   VisibilityResult checkVisibleByKey(String keyValue) {
     return _checkVisibility(findElementByKey(keyValue));
+  }
+
+  /// Checks visibility of the first widget whose visible text contains
+  /// [substring] (case-insensitive). Occlusion-aware (see
+  /// [checkTextVisible]). This is the `match: "contains"` form of a
+  /// visibility wait/assert, for labels such as "Start 7-Day Free Trial"
+  /// that a test only knows part of.
+  VisibilityResult checkTextContainsVisible(String substring) {
+    final needle = substring.toLowerCase();
+    return _checkVisibility(_findElementWhere((e) {
+      final t = _widgetOwnText(e.widget);
+      return t != null && t.toLowerCase().contains(needle);
+    }));
+  }
+
+  /// Checks visibility of the widget found by its accessibility label
+  /// ([findElementBySemantics]). Occlusion-aware (see [checkTextVisible]).
+  VisibilityResult checkVisibleBySemantics(String label) {
+    return _checkVisibility(findElementBySemantics(label));
+  }
+
+  /// The [ScrollPosition] of a [Scrollable] element, or null when no
+  /// position is attached yet. Public so the gesture engine can tell
+  /// which visible scrollables can actually move in a direction.
+  ScrollPosition? scrollPositionOf(Element element) =>
+      _scrollPositionOf(element);
+
+  /// Whether a widget-driven animation is running right now — a route
+  /// transition (`SlideTransition`/`FadeTransition`), a drawer sliding open
+  /// (its `AnimatedBuilder`), a sheet, a page settling. Reported on every
+  /// `/screen` dump so a consumer knows the readout is a frame of a
+  /// transition, not the settled screen, and polled by `/wait_for_idle`.
+  ///
+  /// The signal is the tree, not the scheduler: an [AnimatedWidget] or
+  /// [ListenableBuilder] whose listenable is an [Animation] that is
+  /// currently animating. The scheduler's ticker count is the wrong
+  /// measure — a focused field's blinking caret and a tap's ink ripple keep
+  /// tickers alive without moving any widget, and would make the app never
+  /// "idle" while a form has focus. A continuous widget animation (a
+  /// spinner's `AnimatedBuilder`, a shimmer) does keep this true.
+  bool get isAnimating {
+    final root = WidgetsBinding.instance.rootElement;
+    if (root == null) return false;
+    var found = false;
+    void visit(Element element) {
+      if (found) return;
+      if (_drivesRunningAnimation(element)) {
+        found = true;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    root.visitChildren(visit);
+    return found;
+  }
+
+  /// Whether [element] is driven by an [Animation] that is mid-flight: an
+  /// [AnimatedWidget] (`SlideTransition`, `AnimatedBuilder`,
+  /// `ListenableBuilder`) whose listenable is an animation, or a
+  /// [FadeTransition] (a render-object widget, not an [AnimatedWidget]).
+  /// Implicitly animated widgets (`AnimatedContainer`, …) keep their
+  /// controller protected and are not detected.
+  bool _drivesRunningAnimation(Element element) {
+    final widget = element.widget;
+    Animation<Object?>? animation;
+    if (widget is AnimatedWidget) {
+      final l = widget.listenable;
+      if (l is Animation) animation = l;
+    } else if (widget is FadeTransition) {
+      animation = widget.opacity;
+    } else if (widget is SliverFadeTransition) {
+      animation = widget.opacity;
+    }
+    return animation != null && animation.isAnimating;
   }
 
   // ---------------------------------------------------------------------------
@@ -485,7 +719,11 @@ class TreeWalker {
 
   /// Whether any widget is hit-testable at [point] in [element]'s
   /// [RenderView] — i.e. a tap there would land on *something* rather than
-  /// fall through to nothing (off-screen / clipped away).
+  /// fall through to nothing (off-screen / clipped away, or every route
+  /// ignoring pointers mid-transition).
+  ///
+  /// The [RenderView] itself always joins the hit path and is not "something":
+  /// a pointer that reaches only the view is a pointer nobody handles.
   bool _hasHitAt(Element element, Offset point) {
     final ro = element.renderObject;
     if (ro == null) return false;
@@ -495,9 +733,29 @@ class TreeWalker {
     final result = HitTestResult();
     root.hitTest(result, position: point);
     for (final entry in result.path) {
-      if (entry.target is RenderObject) return true;
+      final target = entry.target;
+      if (target is RenderObject && !identical(target, root)) return true;
     }
     return false;
+  }
+
+  /// Whether a pointer at [point] would reach only the [RenderView] — no
+  /// widget at all. During a route transition every route's scope ignores
+  /// pointers (`IgnorePointer` in `_ModalScope`), so a tap dispatched then is
+  /// silently dropped by the framework; this is how the bridge tells that
+  /// case from a genuinely occluded target.
+  bool pointersIgnoredAt(Element reference, Offset point) {
+    final ro = reference.renderObject;
+    if (ro == null) return false;
+    final root = _rootRenderObject(ro);
+    if (root is! RenderView) return false;
+    final result = HitTestResult();
+    root.hitTest(result, position: point);
+    for (final entry in result.path) {
+      final target = entry.target;
+      if (target is RenderObject && !identical(target, root)) return false;
+    }
+    return true;
   }
 
   /// Diagnostic name of the render object a tap at [point] would actually
@@ -588,6 +846,8 @@ class TreeWalker {
           node = <String, dynamic>{'type': info.type};
           if (info.key != null) node['key'] = info.key;
           if (nodeText != null) node['text'] = nodeText;
+          final semantics = semanticsOf(element);
+          if (semantics != null) node['semantics'] = semantics;
           final rect = _visibleRect(element, screen);
           if (rect != null) {
             node['rect'] = ElementRect(
@@ -629,6 +889,7 @@ class TreeWalker {
 
     return {
       if (screen != null) 'screen': {'w': screen.width, 'h': screen.height},
+      'animating': isAnimating,
       'elements': elements,
     };
   }
@@ -678,10 +939,8 @@ class TreeWalker {
       final name = _scrollContainerName(w);
       if (name != null) {
         node['type'] = name;
-        final key = w.key;
-        if (node['key'] == null && key is ValueKey) {
-          node['key'] = key.value.toString();
-        }
+        final key = keyOf(w);
+        if (node['key'] == null && key != null) node['key'] = key;
         return false;
       }
       hops++;
@@ -745,10 +1004,31 @@ class TreeWalker {
     if (widget is Icon || widget is Image) return false;
     final text = nodeText?.trim() ?? '';
     if (text.isEmpty) {
-      return widget is Text || widget is RichText || widget is EditableText;
+      // An empty EditableText is the input machinery of a TextField /
+      // CupertinoTextField that is already a node of its own; a bare one
+      // (a custom field built straight on EditableText) has no such
+      // ancestor and must survive, or the empty field vanishes from the
+      // screen readout until it has a value.
+      if (widget is EditableText) return _hasFieldAncestor(element);
+      return widget is Text || widget is RichText;
     }
     final parent = parentLabel?.trim() ?? '';
     return parent.isNotEmpty && text == parent;
+  }
+
+  /// Whether [element] sits inside a [TextField] or [CupertinoTextField] —
+  /// the wrappers that are emitted as the field's own dump node.
+  bool _hasFieldAncestor(Element element) {
+    var found = false;
+    element.visitAncestorElements((ancestor) {
+      final w = ancestor.widget;
+      if (w is TextField || w is CupertinoTextField) {
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    return found;
   }
 
   // ---------------------------------------------------------------------------
@@ -761,12 +1041,10 @@ class TreeWalker {
   /// Visible for testing.
   ElementInfo extractInfo(Element element) {
     final widget = element.widget;
-    final key = widget.key;
-    final keyStr = key is ValueKey ? key.value.toString() : null;
 
     return ElementInfo(
       type: widget.runtimeType.toString(),
-      key: keyStr,
+      key: keyOf(widget),
       text: extractText(element),
       rect: _rectOf(element),
       enabled: _extractEnabled(widget),
@@ -1217,7 +1495,7 @@ class TreeWalker {
       return true;
     }
     if (widget is Scrollable) return true;
-    if (widget.key is ValueKey) return true;
+    if (keyOf(widget) != null) return true;
     if (_extractEnabled(widget) != null) return true;
     if (_extractChecked(widget) != null) return true;
     return widget.runtimeType.toString().endsWith('Button');
@@ -1228,10 +1506,8 @@ class TreeWalker {
       'type': element.widget.runtimeType.toString(),
     };
 
-    final key = element.widget.key;
-    if (key is ValueKey) {
-      node['key'] = key.value.toString();
-    }
+    final key = keyOf(element.widget);
+    if (key != null) node['key'] = key;
 
     final text = extractText(element);
     if (text != null) node['text'] = text;
@@ -1266,6 +1542,7 @@ class TreeWalker {
 
   bool? _extractEnabled(Widget widget) {
     if (widget is TextField) return widget.enabled ?? true;
+    if (widget is CupertinoTextField) return widget.enabled;
     if (widget is ElevatedButton) return widget.onPressed != null;
     if (widget is TextButton) return widget.onPressed != null;
     if (widget is OutlinedButton) return widget.onPressed != null;
