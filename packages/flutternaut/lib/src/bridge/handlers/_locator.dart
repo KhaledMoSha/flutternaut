@@ -25,18 +25,26 @@ ElementInfo? resolveLocator(BridgeRequest req, TreeWalker walker) {
 }
 
 /// Checks visibility for the `key`, `text` or `semantics` locator on [req].
-/// `text` honours `match: "contains"`. Returns a not-found result when no
-/// locator field is present.
+/// `text` honours `match: "contains"`; `nth` (when present) requires the
+/// nth distinct visible match — the index a catalog ref carries. Returns a
+/// not-found result when no locator field is present.
 VisibilityResult resolveVisibility(BridgeRequest req, TreeWalker walker) {
+  final nth = req.body.containsKey('nth') ? req.integer('nth') : null;
   final key = req.string('key');
-  if (key != null) return walker.checkVisibleByKey(key);
+  if (key != null) return walker.checkVisibleByKey(key, nth: nth);
   final text = req.string('text');
   if (text != null) {
     return _wantsContains(req)
-        ? walker.checkTextContainsVisible(text)
-        : walker.checkTextVisible(text);
+        ? walker.checkTextContainsVisible(text, nth: nth)
+        : walker.checkTextVisible(text, nth: nth);
   }
   final semantics = req.string('semantics');
-  if (semantics != null) return walker.checkVisibleBySemantics(semantics);
-  return const VisibilityResult(exists: false, visible: false);
+  if (semantics != null) {
+    return walker.checkVisibleBySemantics(semantics, nth: nth);
+  }
+  return const VisibilityResult(
+    exists: false,
+    visible: false,
+    reason: 'no "key", "text" or "semantics" locator given',
+  );
 }

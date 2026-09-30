@@ -48,6 +48,28 @@ class GestureHandler {
   /// match, picks one in reading order (0-based); without it a duplicate
   /// label is an ambiguity failure.
   Future<Map<String, dynamic>> _tap(BridgeRequest req) async {
+    // `at: {x, y}` (logical pixels) is the explicit coordinate tap — for a
+    // target no locator can address. It is still gated (see
+    // [GestureDispatcher.tapAt]) and reports the widget it reached.
+    final at = req.map('at');
+    if (at != null) {
+      final x = at['x'];
+      final y = at['y'];
+      if (x is! num || y is! num) {
+        throw ArgumentError('"at" needs numeric "x" and "y" (logical pixels)');
+      }
+      final point = Offset(x.toDouble(), y.toDouble());
+      final target = await _runner.run(() => _gesture.tapAt(point));
+      return ActionResult(
+        action: 'tap',
+        success: true,
+        extras: {
+          'at': {'x': point.dx, 'y': point.dy},
+          'hit': target,
+        },
+      ).toJson();
+    }
+
     final near = req.string('near');
     if (near != null) {
       final nth = req.integer('nth');
@@ -145,8 +167,8 @@ class GestureHandler {
   }
 
   Future<Map<String, dynamic>> _longPress(BridgeRequest req) async {
-    final duration = Duration(
-        milliseconds: req.integer('duration_ms', defaultValue: 600));
+    final duration =
+        Duration(milliseconds: req.integer('duration_ms', defaultValue: 600));
 
     // `near` + `nth` addresses an icon-only control by its row anchor —
     // same locator as `/tap` (see [_tap]).
@@ -225,9 +247,8 @@ class GestureHandler {
     // scrollable on the direction's axis (the `/screen` dump's
     // `scrollIndex`). This is the handle for scroll views that expose no
     // key and no addressable child (e.g. an image-only carousel).
-    final scrollIndex = req.body.containsKey('scrollIndex')
-        ? req.integer('scrollIndex')
-        : null;
+    final scrollIndex =
+        req.body.containsKey('scrollIndex') ? req.integer('scrollIndex') : null;
     if (scrollIndex != null && direction != null) {
       final success = await _runner.run(
         () => _gesture.swipeAtIndex(

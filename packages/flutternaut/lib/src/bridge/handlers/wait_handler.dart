@@ -33,17 +33,33 @@ class WaitHandler {
     return result.toJson();
   }
 
+  /// Waits until the locator is visible to a person (see
+  /// [TreeWalker.checkTextVisible]); on timeout the result's `detail` says
+  /// why it was not, as of the last check.
   Future<Map<String, dynamic>> _waitUntilVisible(BridgeRequest req) async {
-    final result = await _poll(
-      () => resolveVisibility(req, _walker).visible,
+    final result = await _pollExplained(
+      () {
+        final v = resolveVisibility(req, _walker);
+        return (v.visible, v.reason);
+      },
       timeoutMs: req.integer('timeout_ms', defaultValue: 10000),
     );
     return result.toJson();
   }
 
+  /// Waits until no match of the locator is visible — removed from the
+  /// tree, faded out, offstage, or hidden behind a dialog/sheet all count
+  /// as gone, because a person no longer sees it. (Tree existence is
+  /// `assert_not_exists`.)
   Future<Map<String, dynamic>> _waitUntilGone(BridgeRequest req) async {
-    final result = await _poll(
-      () => resolveLocator(req, _walker) == null,
+    final result = await _pollExplained(
+      () {
+        final v = resolveVisibility(req, _walker);
+        return (
+          !v.visible,
+          v.visible ? 'a match is still visible on screen' : null,
+        );
+      },
       timeoutMs: req.integer('timeout_ms', defaultValue: 10000),
     );
     return result.toJson();
@@ -60,17 +76,41 @@ class WaitHandler {
     return result.toJson();
   }
 
-  /// Waits until no widget-driven animation is running (see
-  /// [TreeWalker.isAnimating]) — every route, drawer, sheet and page
-  /// transition has finished. A blinking caret or an ink ripple does not
-  /// count; a spinner does.
+  /// Waits until no route transition is running (see
+  /// [TreeWalker.isTransitioning]) — every page push/pop, dialog, sheet and
+  /// menu open/close has finished. Continuous content animations (a
+  /// spinner, a Lottie loop) never end and are deliberately not waited for.
   Future<Map<String, dynamic>> _waitForIdle(BridgeRequest req) async {
     final result = await _poll(
-      () => !_walker.isAnimating,
+      () => !_walker.isTransitioning,
       timeoutMs: req.integer('timeout_ms', defaultValue: 10000),
       intervalMs: 50,
     );
     return result.toJson();
+  }
+
+  /// Like [_poll], for a check that also explains a miss: the last
+  /// explanation is returned as the failed result's `detail`.
+  Future<WaitResult> _pollExplained(
+    (bool, String?) Function() check, {
+    int timeoutMs = 10000,
+    int intervalMs = 200,
+  }) async {
+    final sw = Stopwatch()..start();
+    String? detail;
+    while (sw.elapsedMilliseconds < timeoutMs) {
+      final (met, why) = await _runner.run(check);
+      if (met) {
+        return WaitResult(success: true, elapsedMs: sw.elapsedMilliseconds);
+      }
+      detail = why;
+      await Future<void>.delayed(Duration(milliseconds: intervalMs));
+    }
+    return WaitResult(
+      success: false,
+      elapsedMs: sw.elapsedMilliseconds,
+      detail: detail,
+    );
   }
 
   Future<WaitResult> _poll(

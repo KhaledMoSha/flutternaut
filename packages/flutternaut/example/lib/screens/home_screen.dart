@@ -4,6 +4,7 @@ import 'package:flutternaut/flutternaut.dart';
 import 'control_flow_screen.dart';
 import 'device_screen.dart';
 import 'gestures_screen.dart';
+import 'lab_screen.dart';
 import 'otp_screen.dart';
 
 class TodoItem {
@@ -86,6 +87,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => const OtpScreen()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.science_outlined),
+              title: const Text('Agent lab'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const LabScreen()),
                 );
               },
             ),

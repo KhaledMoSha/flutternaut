@@ -1,3 +1,8 @@
+import 'dart:math';
+
+import 'package:flutter/widgets.dart';
+
+import '../app_identity.dart';
 import '../engine/main_thread_runner.dart';
 import '../engine/tree_walker.dart';
 import '../router.dart';
@@ -6,14 +11,28 @@ import '../router.dart';
 class HealthHandler {
   /// Bridge protocol version. Bump when the request/response shapes change
   /// so clients can detect incompatibility.
-  static const String protocolVersion = '1.0.0';
+  static const String protocolVersion = '1.1.0';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;
 
+  /// Random per bridge start. A client that saw one instance answer the
+  /// port before launching an app, and sees the same instance after, knows
+  /// the new app never bound the port — an older app still holds it.
+  final String _instanceId = _randomId();
+
+  /// Which app this bridge runs in (see [readAppIdentity]).
+  final String? _app = readAppIdentity();
+
   HealthHandler({required TreeWalker walker, required MainThreadRunner runner})
       : _walker = walker,
         _runner = runner;
+
+  static String _randomId() {
+    final rnd = Random.secure();
+    return List.generate(
+        8, (_) => rnd.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
 
   void register(BridgeRouter router) {
     router.get('/health', _health);
@@ -27,6 +46,11 @@ class HealthHandler {
       'status': 'ok',
       'bridge': 'flutternaut',
       'protocol_version': protocolVersion,
+      'instance_id': _instanceId,
+      if (_app != null) 'app': _app,
+      // False until the app has put its first frame on screen: a screen
+      // read before then is empty (or a splash), not the app.
+      'first_frame': WidgetsBinding.instance.firstFrameRasterized,
     };
   }
 

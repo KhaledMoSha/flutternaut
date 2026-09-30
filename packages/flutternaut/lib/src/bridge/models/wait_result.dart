@@ -9,19 +9,26 @@ class WaitResult {
   /// How long the poll ran before completing or timing out.
   final int elapsedMs;
 
+  /// Why the condition did not hold at the last check (e.g. `"up for it"
+  /// exists but is at opacity 0.00`). Only set on failure, and only by
+  /// waits that can explain themselves.
+  final String? detail;
+
   /// Creates a [WaitResult].
   const WaitResult({
     required this.success,
     required this.elapsedMs,
+    this.detail,
   });
 
   /// Serializes this result to a JSON map.
   Map<String, dynamic> toJson() => {
         'success': success,
         'elapsed_ms': elapsedMs,
+        if (detail != null) 'detail': detail,
       };
 
   @override
-  String toString() =>
-      'WaitResult(success: $success, elapsed: ${elapsedMs}ms)';
+  String toString() => 'WaitResult(success: $success, elapsed: ${elapsedMs}ms'
+      '${detail != null ? ', detail: $detail' : ''})';
 }

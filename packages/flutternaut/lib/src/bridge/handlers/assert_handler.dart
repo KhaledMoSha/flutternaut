@@ -32,10 +32,12 @@ class AssertHandler {
   Future<Map<String, dynamic>> _assertVisible(BridgeRequest req) async {
     req.requireLocator();
     return _runner.run(() {
-      final passed = resolveVisibility(req, _walker).visible;
+      final v = resolveVisibility(req, _walker);
       return _result(
-        passed,
-        passed ? 'Element is visible' : 'Element is not visible',
+        v.visible,
+        v.visible
+            ? 'Element is visible'
+            : 'Element is not visible: ${v.reason ?? 'no visible match'}',
       );
     });
   }

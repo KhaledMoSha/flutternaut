@@ -223,7 +223,7 @@ void main() {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
-                child: const SizedBox.expand(),
+                child: const ColoredBox(color: Color(0xFFFFFFFF)),
               ),
             ),
           ],
@@ -645,12 +645,13 @@ void main() {
           children: [
             const Center(child: Text('under', key: ValueKey('under'))),
             // An opaque full-screen overlay on top: it is the frontmost thing
-            // hit-tested at the text's center, from an unrelated branch.
+            // hit-tested at the text's center, from an unrelated branch, and
+            // it paints over the text.
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () {},
-                child: const SizedBox.expand(),
+                child: const ColoredBox(color: Color(0xFFFFFFFF)),
               ),
             ),
           ],
@@ -1199,10 +1200,11 @@ void main() {
       expect(button.containsKey('semantics'), isFalse);
     });
 
-    testWidgets('animating is false on a settled screen and true while an '
-        'animation runs', (tester) async {
+    testWidgets('a content animation is reported under animations, not as '
+        'a transition', (tester) async {
       await tester.pumpWidget(_app(const Text('still')));
       expect(walker.dumpVisibleTree()['animating'], isFalse);
+      expect(walker.dumpVisibleTree()['animations'], isEmpty);
 
       final controller = AnimationController(
         vsync: tester,
@@ -1214,12 +1216,15 @@ void main() {
         child: const Text('fading'),
       )));
       controller.forward();
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(walker.isAnimating, isTrue);
-      expect(walker.dumpVisibleTree()['animating'], isTrue);
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1)); // mid-fade, opacity 0.5
+      final dump = walker.dumpVisibleTree();
+      expect(dump['animating'], isFalse,
+          reason: 'a widget fade is not a route transition');
+      expect(dump['animations'], {'animation': 1});
 
       await tester.pumpAndSettle();
-      expect(walker.dumpVisibleTree()['animating'], isFalse);
+      expect(walker.dumpVisibleTree()['animations'], isEmpty);
     });
 
     testWidgets('a focused field (blinking caret) and a spinner-free screen '
@@ -1229,32 +1234,75 @@ void main() {
       await tester.pumpWidget(_app(TextField(focusNode: node)));
       node.requestFocus();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(walker.isAnimating, isFalse,
+      expect(walker.isTransitioning, isFalse);
+      expect(walker.runningAnimations(), isEmpty,
           reason: 'the caret blink must not count as an animation');
     });
 
-    testWidgets('an AnimatedBuilder driven by a running controller (the '
-        'drawer\'s mechanism) is animating, then settles', (tester) async {
-      final controller = AnimationController(
-        vsync: tester,
-        duration: const Duration(milliseconds: 300),
-      );
-      addTearDown(controller.dispose);
-      await tester.pumpWidget(_app(AnimatedBuilder(
-        animation: controller,
-        builder: (context, child) => Align(
-          alignment: Alignment.centerLeft,
-          widthFactor: 0.5 + controller.value / 2,
-          child: const SizedBox(width: 200, height: 50),
-        ),
+    testWidgets('a looping spinner is a content animation (spinner ×1) and '
+        'never a transition', (tester) async {
+      await tester.pumpWidget(_app(const Center(
+        child: CircularProgressIndicator(),
       )));
-      expect(walker.isAnimating, isFalse);
-      controller.forward();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(walker.isTransitioning, isFalse);
+      expect(walker.runningAnimations(), {'spinner': 1},
+          reason: 'one spinner counts once however many animated widgets '
+              'it builds');
+    });
+
+    testWidgets('a spinner on a hidden route or offstage tab is not reported',
+        (tester) async {
+      await tester.pumpWidget(_app(const Offstage(
+        child: CircularProgressIndicator(),
+      )));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(walker.runningAnimations(), isEmpty);
+    });
+
+    testWidgets('a page push is a transition until it completes',
+        (tester) async {
+      final navKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: navKey,
+        home: const Scaffold(body: Text('home')),
+      ));
+      expect(walker.isTransitioning, isFalse);
+
+      navKey.currentState!.push(MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('next')),
+      ));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));
-      expect(walker.isAnimating, isTrue, reason: 'mid-flight');
+      expect(walker.isTransitioning, isTrue, reason: 'mid-push');
+      expect(walker.dumpVisibleTree()['animating'], isTrue);
+      expect(walker.runningAnimations(), isEmpty,
+          reason: 'the route\'s own transition widgets are not content '
+              'animations');
+
       await tester.pumpAndSettle();
-      expect(walker.isAnimating, isFalse);
+      expect(walker.isTransitioning, isFalse);
+    });
+
+    testWidgets('a dialog opening is a transition; a spinner inside it '
+        'after it opens is not', (tester) async {
+      final navKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: navKey,
+        home: const Scaffold(body: Text('home')),
+      ));
+      showDialog<void>(
+        context: navKey.currentContext!,
+        builder: (_) => const Dialog(child: CircularProgressIndicator()),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 30));
+      expect(walker.isTransitioning, isTrue);
+
+      await tester.pump(const Duration(seconds: 1));
+      expect(walker.isTransitioning, isFalse,
+          reason: 'the dialog has opened; only the spinner keeps moving');
+      expect(walker.runningAnimations(), {'spinner': 1});
     });
 
     testWidgets('an empty unkeyed TextField is one node, not two',

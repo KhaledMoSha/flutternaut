@@ -50,6 +50,32 @@ class GestureDispatcher {
     return true;
   }
 
+  /// Taps the global logical point [at] — the explicit coordinate tap, for
+  /// a target no locator can address. The point is still gated: off the
+  /// screen, or where no widget receives pointers (a route transition in
+  /// progress, empty space), throws [ActionFailure]. Returns a description
+  /// of the widget the tap reached, so the caller can confirm it hit what
+  /// it meant to.
+  Future<String> tapAt(Offset at) async {
+    final probe = walker.probeTapAt(at);
+    if (probe.offScreen) {
+      throw ActionFailure(
+        'Point ${_fmtOffset(at)} is outside the screen (logical pixels).',
+      );
+    }
+    if (probe.pointersIgnored) {
+      throw ActionFailure(
+        'No widget receives pointers at ${_fmtOffset(at)}: either nothing '
+        'is there, or a route transition is in progress (Flutter ignores '
+        'pointers until it ends — run wait_idle, then retry).',
+      );
+    }
+    final session = _beginPointer(at);
+    await _pumpFrames();
+    await session.end(at);
+    return probe.target ?? 'unknown widget';
+  }
+
   /// Taps the [nth] unlabeled interactive control (icon-only button) in
   /// the row of the unique on-screen text [anchorText] — the `near`
   /// locator, for controls that carry no key and no text of their own
@@ -155,7 +181,8 @@ class GestureDispatcher {
     required String input,
     bool clear = false,
   }) async {
-    final (focusPoint, state) = await _resolveActableField(key: key, text: text);
+    final (focusPoint, state) =
+        await _resolveActableField(key: key, text: text);
     if (focusPoint != null) await _focusField(focusPoint);
     _writeInto(state, input, clear: clear);
     return true;
@@ -183,7 +210,8 @@ class GestureDispatcher {
   /// Drives [input] into [state] through the real input pipeline so
   /// inputFormatters run and `TextField.onChanged` fires (a plain
   /// `controller.value =` does not). Appends unless [clear].
-  void _writeInto(EditableTextState state, String input, {required bool clear}) {
+  void _writeInto(EditableTextState state, String input,
+      {required bool clear}) {
     final current = state.textEditingValue.text;
     final newText = clear ? input : current + input;
     state.userUpdateTextEditingValue(
@@ -201,7 +229,8 @@ class GestureDispatcher {
   /// so an off-screen or occluded field fails loudly rather than silently
   /// clearing nothing.
   Future<bool> clearText({String? key, String? text}) async {
-    final (focusPoint, state) = await _resolveActableField(key: key, text: text);
+    final (focusPoint, state) =
+        await _resolveActableField(key: key, text: text);
     if (focusPoint != null) await _focusField(focusPoint);
     _writeInto(state, '', clear: true);
     return true;
@@ -521,18 +550,14 @@ class GestureDispatcher {
     }
 
     // More than one element matches. Disambiguate by what is actually
-    // tappable right now — duplicates that are off-screen or hidden are not
-    // real conflicts. Uses the same tappability policy as the single-match
-    // path (strict for interactive targets, lenient for plain labels).
-    // Reading order makes `nth` stable and identical to the numbering the
-    // engine catalog shows next to duplicate labels.
-    final visible = <(Element, Offset)>[];
-    for (final element in walker.inReadingOrder(matches)) {
-      final point = walker.reachableTapPoint(element);
-      if (point != null) {
-        visible.add((element, point));
-      }
-    }
+    // tappable right now — duplicates that are off-screen, faded out or
+    // hidden are not real conflicts, and stacked layers of one control (a
+    // nav icon's two glyphs) count once. Uses the same tappability policy
+    // as the single-match path (strict for interactive targets, lenient for
+    // plain labels). This is the list the `/screen` dump numbers
+    // (`text_nth`/`semantics_nth`), so a catalog ref's `nth` always
+    // resolves to the widget it names.
+    final visible = walker.actableMatches(matches);
 
     if (visible.isEmpty) {
       throw ActionFailure(
@@ -546,7 +571,9 @@ class GestureDispatcher {
         throw ActionFailure(
           'nth $nth is out of range for $desc: ${visible.length} matching '
           'element(s) are visible and tappable — '
-          '${_describeCandidates([for (final v in visible) v.$1], numbered: true)}.',
+          '${_describeCandidates([
+                for (final v in visible) v.$1
+              ], numbered: true)}.',
         );
       }
       return visible[nth].$2;
@@ -683,8 +710,7 @@ class GestureDispatcher {
     while (scrollable != null) {
       final position = scrollable.position;
       final object = context.findRenderObject();
-      if (object != null &&
-          position.physics.shouldAcceptUserOffset(position)) {
+      if (object != null && position.physics.shouldAcceptUserOffset(position)) {
         reveals.add((position, object, targetRenderObject));
       }
       targetRenderObject ??= object;

@@ -177,22 +177,52 @@ class TreeWalker {
   ///
   /// Uses `toPlainText(includeSemanticsLabels: false)` so a span's
   /// `semanticsLabel` override doesn't shadow the visible text.
+  ///
+  /// Display text goes through [normalizeText] (an inline `WidgetSpan` such
+  /// as a typing cursor is left out, surrounding whitespace trimmed) so the
+  /// `/screen` dump and every text finder see the SAME string — a label
+  /// the dump reports is always a label the finders match. A field's
+  /// value ([EditableText]) is user data and is returned verbatim.
   String? _widgetOwnText(Widget w) {
     if (w is EditableText) return w.controller.text;
     if (w is Text) {
-      return w.data ?? w.textSpan?.toPlainText(includeSemanticsLabels: false);
+      final raw =
+          w.data ?? w.textSpan?.toPlainText(includeSemanticsLabels: false);
+      return raw == null ? null : normalizeText(raw);
     }
     if (w is RichText) {
-      return w.text.toPlainText(includeSemanticsLabels: false);
+      return normalizeText(w.text.toPlainText(includeSemanticsLabels: false));
     }
     return null;
+  }
+
+  /// The object-replacement character `toPlainText` emits for each inline
+  /// widget ([WidgetSpan]/[PlaceholderSpan]).
+  static const String _placeholderChar = '￼';
+
+  /// Canonical form of a display string: inline-widget placeholders
+  /// removed (the whitespace they leave collapsed to one space) and the
+  /// result trimmed. Applied to both sides of every text match.
+  static String normalizeText(String raw) {
+    if (!raw.contains(_placeholderChar)) return raw.trim();
+    return raw
+        .replaceAll(RegExp(r'[ \t]*￼[ \t]*'), ' ')
+        .replaceAll(RegExp(r' {2,}'), ' ')
+        .trim();
+  }
+
+  /// Whether [element]'s own text equals the locator [text] (both sides
+  /// normalized — see [normalizeText]).
+  bool _textEquals(Element element, String text) {
+    final own = _widgetOwnText(element.widget);
+    return own != null && own == normalizeText(text);
   }
 
   /// Finds the first text-bearing widget ([Text], `Text.rich`,
   /// [RichText], [EditableText]) whose visible text matches [text]
   /// exactly.
   ElementInfo? findByText(String text) {
-    return _findWhere((element) => _widgetOwnText(element.widget) == text);
+    return _findWhere((element) => _textEquals(element, text));
   }
 
   /// Resolves the visible label [text] to the [TextEditingController]
@@ -259,7 +289,7 @@ class TreeWalker {
   /// Resolves the visible label [text] to the [EditableText] element of
   /// its associated field. See [findControllerByText] for the order.
   Element? _resolveEditableElementByText(String text) {
-    final el = _findElementWhere((e) => _widgetOwnText(e.widget) == text);
+    final el = _findElementWhere((e) => _textEquals(e, text));
     if (el == null) return null;
 
     final enclosing = _enclosingEditableElement(el);
@@ -297,7 +327,7 @@ class TreeWalker {
   /// Finds the first [Element] whose own visible text equals [text]
   /// exactly (case-sensitive — see [findByText]).
   Element? findElementByText(String text) {
-    return _findElementWhere((e) => _widgetOwnText(e.widget) == text);
+    return _findElementWhere((e) => _textEquals(e, text));
   }
 
   /// Every [Element] whose [ValueKey] value matches [keyValue]. Used to
@@ -312,7 +342,7 @@ class TreeWalker {
   /// Every text-bearing [Element] whose own visible text equals [text]
   /// exactly (case-sensitive).
   List<Element> findAllElementsByText(String text) {
-    return _findAllElementsWhere((e) => _widgetOwnText(e.widget) == text);
+    return _findAllElementsWhere((e) => _textEquals(e, text));
   }
 
   /// Every text-bearing [Element] whose own visible text contains
@@ -488,7 +518,8 @@ class TreeWalker {
 
   /// Whether [s] contains any letter or digit — glyph "labels"
   /// (private-use code points) do not count as readable text.
-  bool _hasAlnum(String s) => s.contains(RegExp(r'[\p{L}\p{N}]', unicode: true));
+  bool _hasAlnum(String s) =>
+      s.contains(RegExp(r'[\p{L}\p{N}]', unicode: true));
 
   /// Whether two rects overlap on the vertical axis (share a row band).
   bool _yOverlaps(ElementRect a, ElementRect b) =>
@@ -515,37 +546,55 @@ class TreeWalker {
   // Visibility
   // ---------------------------------------------------------------------------
 
-  /// Checks visibility of the widget found by [text]. Visibility is
-  /// occlusion-aware — an on-screen element hidden under a foreign widget
-  /// (nav bar, app bar, overlay) reports `visible == false`. See
-  /// [_checkVisibility].
-  VisibilityResult checkTextVisible(String text) {
-    return _checkVisibility(findElementByText(text));
+  /// Checks whether a widget whose text equals [text] is visible — to a
+  /// person looking at the screen, by the same rules the `/screen` dump
+  /// uses (see [_visibilityOf]): laid out, not offstage, painted above
+  /// [_visibleOpacityThreshold], not clipped away, not on a route hidden
+  /// by a modal or being closed, and not covered at every sample point.
+  ///
+  /// Every match is considered, not just the first in tree order: a hidden
+  /// duplicate (a page kept alive underneath, a faded-out cross-fade layer)
+  /// never masks a visible one. With [nth], exactly the nth visible match
+  /// (reading order, stacked copies of one control counted once) must
+  /// exist — the same index the dump reports as `text_nth`.
+  VisibilityResult checkTextVisible(String text, {int? nth}) {
+    return _checkVisibility(
+      findAllElementsByText(text),
+      'text "$text"',
+      nth: nth,
+    );
   }
 
-  /// Checks visibility of the widget found by [ValueKey]. Occlusion-aware
-  /// (see [checkTextVisible]).
-  VisibilityResult checkVisibleByKey(String keyValue) {
-    return _checkVisibility(findElementByKey(keyValue));
+  /// Visibility of the widget(s) with [ValueKey] [keyValue] (see
+  /// [checkTextVisible]).
+  VisibilityResult checkVisibleByKey(String keyValue, {int? nth}) {
+    return _checkVisibility(
+      findAllElementsByKey(keyValue),
+      'key "$keyValue"',
+      nth: nth,
+    );
   }
 
-  /// Checks visibility of the first widget whose visible text contains
-  /// [substring] (case-insensitive). Occlusion-aware (see
-  /// [checkTextVisible]). This is the `match: "contains"` form of a
-  /// visibility wait/assert, for labels such as "Start 7-Day Free Trial"
-  /// that a test only knows part of.
-  VisibilityResult checkTextContainsVisible(String substring) {
-    final needle = substring.toLowerCase();
-    return _checkVisibility(_findElementWhere((e) {
-      final t = _widgetOwnText(e.widget);
-      return t != null && t.toLowerCase().contains(needle);
-    }));
+  /// Visibility of the widget(s) whose visible text contains [substring]
+  /// (case-insensitive) — the `match: "contains"` form, for labels such as
+  /// "Start 7-Day Free Trial" that a test only knows part of (see
+  /// [checkTextVisible]).
+  VisibilityResult checkTextContainsVisible(String substring, {int? nth}) {
+    return _checkVisibility(
+      findAllElementsByTextContains(substring),
+      'text containing "$substring"',
+      nth: nth,
+    );
   }
 
-  /// Checks visibility of the widget found by its accessibility label
-  /// ([findElementBySemantics]). Occlusion-aware (see [checkTextVisible]).
-  VisibilityResult checkVisibleBySemantics(String label) {
-    return _checkVisibility(findElementBySemantics(label));
+  /// Visibility of the widget(s) with accessibility label [label] (see
+  /// [findAllElementsBySemantics] and [checkTextVisible]).
+  VisibilityResult checkVisibleBySemantics(String label, {int? nth}) {
+    return _checkVisibility(
+      findAllElementsBySemantics(label),
+      'semantics "$label"',
+      nth: nth,
+    );
   }
 
   /// The [ScrollPosition] of a [Scrollable] element, or null when no
@@ -554,55 +603,192 @@ class TreeWalker {
   ScrollPosition? scrollPositionOf(Element element) =>
       _scrollPositionOf(element);
 
-  /// Whether a widget-driven animation is running right now — a route
-  /// transition (`SlideTransition`/`FadeTransition`), a drawer sliding open
-  /// (its `AnimatedBuilder`), a sheet, a page settling. Reported on every
-  /// `/screen` dump so a consumer knows the readout is a frame of a
-  /// transition, not the settled screen, and polled by `/wait_for_idle`.
+  /// Whether a **route transition** is in progress right now — a page push
+  /// or pop, a dialog, bottom sheet or menu opening or closing, or an
+  /// interactive back-swipe. This is what `/wait_for_idle` waits for and
+  /// what the dump's `animating` flag reports: while a route animates,
+  /// Flutter drops or cancels pointers, so acting mid-transition is
+  /// unreliable.
   ///
-  /// The signal is the tree, not the scheduler: an [AnimatedWidget] or
-  /// [ListenableBuilder] whose listenable is an [Animation] that is
-  /// currently animating. The scheduler's ticker count is the wrong
-  /// measure — a focused field's blinking caret and a tap's ink ripple keep
-  /// tickers alive without moving any widget, and would make the app never
-  /// "idle" while a form has focus. A continuous widget animation (a
-  /// spinner's `AnimatedBuilder`, a shimmer) does keep this true.
-  bool get isAnimating {
+  /// Continuous content animations (a spinner, a Lottie loop, a live map
+  /// feed) are deliberately NOT transitions — they never end, so waiting
+  /// for them can never succeed. They are reported separately by
+  /// [runningAnimations].
+  bool get isTransitioning => _transitionState().transitioning;
+
+  /// The on-screen content animations running right now, by kind
+  /// (`spinner`, `lottie`, `shimmer`, `animation`) → count. Excludes route
+  /// transitions (see [isTransitioning]) and anything hidden — offstage
+  /// tabs, routes underneath, faded-out layers — so the readout only names
+  /// motion the user can actually see.
+  ///
+  /// The signal is the tree, not the scheduler: an [AnimatedWidget]
+  /// (`AnimatedBuilder`, `SlideTransition`, …) or [FadeTransition] whose
+  /// [Animation] is mid-flight. A focused field's blinking caret and a
+  /// tap's ink ripple keep tickers alive without driving such a widget and
+  /// are not reported.
+  Map<String, int> runningAnimations() {
     final root = WidgetsBinding.instance.rootElement;
-    if (root == null) return false;
-    var found = false;
+    if (root == null) return const {};
+    final routeAnimations = _transitionState().routeAnimations;
+    final layers = _routeLayers();
+    final screen = _screenSize;
+    final counts = <String, int>{};
+    // One owner widget (a CircularProgressIndicator, a Lottie) typically
+    // drives several animated widgets; each owner counts once.
+    final owners = <Element>{};
+
     void visit(Element element) {
-      if (found) return;
-      if (_drivesRunningAnimation(element)) {
-        found = true;
-        return;
+      final animation = _drivingAnimation(element.widget);
+      if (animation != null &&
+          animation.isAnimating &&
+          !_derivesFrom(animation, routeAnimations) &&
+          _isOnScreen(element, screen) &&
+          !layers.hides(element)) {
+        final (kind, owner) = _animationKind(element);
+        if (owners.add(owner)) counts[kind] = (counts[kind] ?? 0) + 1;
       }
       element.visitChildren(visit);
     }
 
     root.visitChildren(visit);
-    return found;
+    return counts;
   }
 
-  /// Whether [element] is driven by an [Animation] that is mid-flight: an
-  /// [AnimatedWidget] (`SlideTransition`, `AnimatedBuilder`,
+  /// Every [ModalRoute] currently in the tree, read off the
+  /// `_ModalScopeStatus` inherited widget each route builds. Reading the
+  /// route through the element — instead of `ModalRoute.of(context)` —
+  /// registers no dependency, so inspecting the app never makes it rebuild.
+  List<ModalRoute<Object?>> _modalRoutes() {
+    final root = WidgetsBinding.instance.rootElement;
+    if (root == null) return const [];
+    final routes = <ModalRoute<Object?>>[];
+    void visit(Element element) {
+      final route = _routeOfScope(element);
+      if (route != null) routes.add(route);
+      element.visitChildren(visit);
+    }
+
+    root.visitChildren(visit);
+    return routes;
+  }
+
+  /// The route whose `_ModalScopeStatus` inherited widget [element] is, or
+  /// null for any other element. Every [ModalRoute] builds exactly one,
+  /// directly above its page, so this identifies route boundaries in the
+  /// element tree. The widget class is private to the framework; its
+  /// `route` field is read dynamically, and a framework change that
+  /// removes it throws rather than silently hiding every route.
+  static ModalRoute<Object?>? _routeOfScope(Element element) {
+    if (element is! InheritedElement ||
+        element.widget.runtimeType.toString() != '_ModalScopeStatus') {
+      return null;
+    }
+    final Object? route = (element.widget as dynamic).route;
+    return route is ModalRoute<Object?> ? route : null;
+  }
+
+  ({bool transitioning, Set<Animation<Object?>> routeAnimations})
+      _transitionState() {
+    var transitioning = false;
+    final animations = <Animation<Object?>>{};
+    for (final route in _modalRoutes()) {
+      final primary = route.animation;
+      final secondary = route.secondaryAnimation;
+      if (primary != null) {
+        animations.add(primary);
+        if (primary.isAnimating) transitioning = true;
+      }
+      if (secondary != null) {
+        animations.add(secondary);
+        if (secondary.isAnimating) transitioning = true;
+      }
+      if (route.navigator?.userGestureInProgress ?? false) {
+        transitioning = true;
+      }
+    }
+    return (transitioning: transitioning, routeAnimations: animations);
+  }
+
+  /// The [Animation] driving [widget], if it is an animation-driven widget:
+  /// an [AnimatedWidget] (`SlideTransition`, `AnimatedBuilder`,
   /// `ListenableBuilder`) whose listenable is an animation, or a
   /// [FadeTransition] (a render-object widget, not an [AnimatedWidget]).
   /// Implicitly animated widgets (`AnimatedContainer`, …) keep their
   /// controller protected and are not detected.
-  bool _drivesRunningAnimation(Element element) {
-    final widget = element.widget;
-    Animation<Object?>? animation;
+  Animation<Object?>? _drivingAnimation(Widget widget) {
     if (widget is AnimatedWidget) {
       final l = widget.listenable;
-      if (l is Animation) animation = l;
-    } else if (widget is FadeTransition) {
-      animation = widget.opacity;
-    } else if (widget is SliverFadeTransition) {
-      animation = widget.opacity;
+      return l is Animation<Object?> ? l : null;
     }
-    return animation != null && animation.isAnimating;
+    if (widget is FadeTransition) return widget.opacity;
+    if (widget is SliverFadeTransition) return widget.opacity;
+    return null;
   }
+
+  /// Whether [animation] is, or is derived from (curved, driven through a
+  /// tween, proxied, reversed), one of the route [roots] — i.e. it is part
+  /// of a route transition, not content animation.
+  bool _derivesFrom(
+    Animation<Object?> animation,
+    Set<Animation<Object?>> roots,
+  ) {
+    Animation<Object?>? current = animation;
+    for (var hops = 0; current != null && hops < 16; hops++) {
+      if (roots.contains(current)) return true;
+      final Object withParent = current;
+      if (withParent is AnimationWithParentMixin<Object?>) {
+        current = withParent.parent;
+      } else if (current is ProxyAnimation) {
+        current = current.parent;
+      } else if (current is TrainHoppingAnimation) {
+        current = current.currentTrain;
+      } else if (current is CompoundAnimation<Object?>) {
+        return _derivesFrom(current.first, roots) ||
+            _derivesFrom(current.next, roots);
+      } else {
+        current = null;
+      }
+    }
+    return false;
+  }
+
+  /// Names what kind of content animation [element] belongs to, by the
+  /// nearest recognisable owner widget a few levels up, and returns that
+  /// owner so the several animated widgets one spinner builds count once.
+  (String, Element) _animationKind(Element element) {
+    String? kind;
+    Element owner = element;
+    var hops = 0;
+    void check(Element e) {
+      final name = e.widget.runtimeType.toString();
+      if (name.contains('ProgressIndicator') ||
+          name.contains('ActivityIndicator') ||
+          name.contains('Spinner') ||
+          name.contains('Spinkit')) {
+        kind = 'spinner';
+      } else if (name.startsWith('Lottie')) {
+        kind = 'lottie';
+      } else if (name.contains('Shimmer') || name.contains('Skeleton')) {
+        kind = 'shimmer';
+      }
+      if (kind != null) owner = e;
+    }
+
+    check(element);
+    if (kind == null) {
+      element.visitAncestorElements((ancestor) {
+        check(ancestor);
+        hops++;
+        return kind == null && hops < _animationOwnerHops;
+      });
+    }
+    return (kind ?? 'animation', owner);
+  }
+
+  /// How far up [_animationKind] looks for the owning widget: a spinner or
+  /// Lottie builds its animated widgets a handful of elements below itself.
+  static const int _animationOwnerHops = 8;
 
   // ---------------------------------------------------------------------------
   // Geometry & hit testing (used by the pre-action confirm pipeline)
@@ -693,17 +879,104 @@ class TreeWalker {
   ///
   /// Either way, a point where nothing is hittable (scrolled off-screen,
   /// clipped away) returns null so the caller can fail loudly.
+  ///
+  /// The centre is tried first; when something covers it (a badge, a
+  /// floating button over one end of a row), the inset sample points of
+  /// [_samplePoints] are tried — a person would tap the part of the target
+  /// they can reach.
   Offset? reachableTapPoint(Element element) {
     final center = centerOfElement(element);
     if (center == null) return null;
 
     if (isHittableAt(element, center)) return center;
+    for (final point in _samplePoints(element).skip(1)) {
+      if (isHittableAt(element, point)) return point;
+    }
 
     if (!_isInteractiveWidget(element.widget) && _hasHitAt(element, center)) {
       return center;
     }
     return null;
   }
+
+  /// The tap-reachable matches among [matches], in reading order, exactly
+  /// as the tap gate counts them — so the `nth` the `/screen` dump reports
+  /// (`text_nth` / `semantics_nth`) is the `nth` a tap resolves:
+  ///
+  ///  * a match that a person cannot see (offstage, faded out, clipped
+  ///    away) or cannot reach with a tap is not a candidate;
+  ///  * stacked copies of ONE control — two glyph layers of a nav icon, a
+  ///    cross-fading label — count once (see [_sameStackedControl]).
+  List<(Element, Offset)> actableMatches(List<Element> matches) {
+    final screen = _screenSize;
+    final out = <(Element, Offset)>[];
+    for (final element in inReadingOrder(matches)) {
+      if (!_isOnScreen(element, screen)) continue;
+      final point = reachableTapPoint(element);
+      if (point == null) continue;
+      if (out.any((kept) => _sameStackedControl(kept.$1, element))) continue;
+      out.add((element, point));
+    }
+    return out;
+  }
+
+  /// Whether [a] and [b] are two layers of the same on-screen control: they
+  /// share their nearest interactive ancestor ([_controlOf]) AND occupy
+  /// essentially the same pixels (intersection over union ≥
+  /// [_stackedOverlap]). Both conditions are required — two separate
+  /// labels under one page-wide GestureDetector are never merged, and two
+  /// overlapping widgets of different controls are never merged.
+  bool _sameStackedControl(Element a, Element b) {
+    final control = _controlOf(a);
+    if (control == null || !identical(control, _controlOf(b))) return false;
+    final ra = _rectOf(a);
+    final rb = _rectOf(b);
+    if (ra == null || rb == null) return false;
+    final x1 = ra.x > rb.x ? ra.x : rb.x;
+    final y1 = ra.y > rb.y ? ra.y : rb.y;
+    final x2 = (ra.x + ra.width) < (rb.x + rb.width)
+        ? ra.x + ra.width
+        : rb.x + rb.width;
+    final y2 = (ra.y + ra.height) < (rb.y + rb.height)
+        ? ra.y + ra.height
+        : rb.y + rb.height;
+    if (x2 <= x1 || y2 <= y1) return false;
+    final inter = (x2 - x1) * (y2 - y1);
+    final union = ra.width * ra.height + rb.width * rb.height - inter;
+    return union > 0 && inter / union >= _stackedOverlap;
+  }
+
+  /// Minimum intersection-over-union for two matches to be layers of one
+  /// control (see [_sameStackedControl]).
+  static const double _stackedOverlap = 0.5;
+
+  /// The nearest interactive ancestor-or-self of [element] — the control a
+  /// tap on it triggers — within [_controlHops] levels, or null.
+  Element? _controlOf(Element element) {
+    if (_isControl(element.widget)) return element;
+    Element? found;
+    var hops = 0;
+    element.visitAncestorElements((ancestor) {
+      if (_isControl(ancestor.widget)) {
+        found = ancestor;
+        return false;
+      }
+      hops++;
+      return hops < _controlHops;
+    });
+    return found;
+  }
+
+  /// How far up [_controlOf] looks: a label sits a handful of elements below
+  /// the InkWell / GestureDetector of the control it names.
+  static const int _controlHops = 12;
+
+  bool _isControl(Widget widget) =>
+      widget is GestureDetector ||
+      widget is InkResponse ||
+      widget is EditableText ||
+      _extractEnabled(widget) != null ||
+      widget.runtimeType.toString().endsWith('Button');
 
   /// Whether [element] is itself an interactive widget — one a user taps to
   /// trigger behavior, as opposed to a plain label used only to locate.
@@ -756,6 +1029,54 @@ class TreeWalker {
       if (target is RenderObject && !identical(target, root)) return false;
     }
     return true;
+  }
+
+  /// What a tap at the global logical [point] would reach right now — the
+  /// gate for a coordinate tap (`tap_at`). `offScreen` when the point lies
+  /// outside the view; `pointersIgnored` when nothing but the [RenderView]
+  /// is hit (mid route transition, or empty space); otherwise `target`
+  /// describes the control (or labelled widget) that owns the frontmost
+  /// hit, e.g. `ElevatedButton "Check In"`.
+  ({bool offScreen, bool pointersIgnored, String? target}) probeTapAt(
+    Offset point,
+  ) {
+    final screen = _screenSize;
+    final root = WidgetsBinding.instance.rootElement?.renderObject;
+    if (screen == null || root is! RenderView) {
+      return (offScreen: true, pointersIgnored: false, target: null);
+    }
+    if (!(Offset.zero & screen).contains(point)) {
+      return (offScreen: true, pointersIgnored: false, target: null);
+    }
+    final result = HitTestResult();
+    root.hitTest(result, position: point);
+    for (final entry in result.path) {
+      final hit = entry.target;
+      if (hit is! RenderObject || identical(hit, root)) continue;
+      return (
+        offScreen: false,
+        pointersIgnored: false,
+        target: _describeHit(hit),
+      );
+    }
+    return (offScreen: false, pointersIgnored: true, target: null);
+  }
+
+  /// A readable name for the widget that owns the hit render object [ro]:
+  /// its nearest control ([_controlOf]) with that control's label, else the
+  /// creating widget's type. Uses the render object's debug creator (the
+  /// bridge runs in debug builds only).
+  String _describeHit(RenderObject ro) {
+    final creator = ro.debugCreator;
+    if (creator is! DebugCreator) return ro.runtimeType.toString();
+    final element = creator.element;
+    final owner = _controlOf(element) ?? element;
+    final label = extractText(owner);
+    final semantics = semanticsOf(owner);
+    final name = owner.widget.runtimeType.toString();
+    if (label != null && _hasAlnum(label)) return '$name "$label"';
+    if (semantics != null) return '$name (semantics "$semantics")';
+    return name;
   }
 
   /// Diagnostic name of the render object a tap at [point] would actually
@@ -813,6 +1134,8 @@ class TreeWalker {
     // scrolls — the two can never disagree.
     final verticalScrollables = findVisibleScrollables(Axis.vertical);
     final horizontalScrollables = findVisibleScrollables(Axis.horizontal);
+    final layers = _routeLayers();
+    final nthIndex = _NthIndex(this);
 
     // [parentLabel] is the text of the nearest already-emitted ancestor. A
     // descendant that only re-presents that label — a button's inner
@@ -826,6 +1149,10 @@ class TreeWalker {
       List<Map<String, dynamic>> sink,
       String? parentLabel,
     ) {
+      // A route hidden behind a dialog/sheet/page, or one that is closing,
+      // is not on screen for the user: its whole subtree is skipped.
+      if (layers.hidesScope(element)) return;
+
       var childSink = sink;
       var childLabel = parentLabel;
       Map<String, dynamic>? node;
@@ -835,11 +1162,12 @@ class TreeWalker {
       // name and key — so the wrapper itself is never emitted (a keyed
       // ListView must not become two nodes carrying the same key).
       final widget = element.widget;
-      final visible = _scrollContainerName(widget) == null &&
-          _isMeaningful(element) &&
-          _isOnScreen(element, screen) &&
-          _isUnobstructed(element);
-      if (visible) {
+      final coverage = _scrollContainerName(widget) == null &&
+              _isMeaningful(element) &&
+              _isOnScreen(element, screen)
+          ? _coverage(element, screen)
+          : _Coverage.covered;
+      if (coverage != _Coverage.covered) {
         final info = extractInfo(element);
         final nodeText = _nodeText(element);
         if (!_isRedundant(element, info, nodeText, parentLabel)) {
@@ -857,9 +1185,11 @@ class TreeWalker {
               height: rect.height,
             ).toJson();
           }
+          if (coverage == _Coverage.partial) node['partial'] = true;
           final enabled = _nodeEnabled(element);
           if (enabled != null) node['enabled'] = enabled;
           if (info.checked != null) node['checked'] = info.checked;
+          nthIndex.annotate(element, node, nodeText, semantics);
           if (widget is Scrollable) {
             _applyScrollInfo(
               element,
@@ -889,7 +1219,8 @@ class TreeWalker {
 
     return {
       if (screen != null) 'screen': {'w': screen.width, 'h': screen.height},
-      'animating': isAnimating,
+      'animating': isTransitioning,
+      'animations': runningAnimations(),
       'elements': elements,
     };
   }
@@ -1139,7 +1470,8 @@ class TreeWalker {
   bool? _tapEnabled(Widget widget) {
     final material = _extractEnabled(widget);
     if (material != null) return material;
-    if (widget is InkResponse) return widget.onTap != null; // InkWell ⊂ InkResponse
+    // InkWell ⊂ InkResponse.
+    if (widget is InkResponse) return widget.onTap != null;
     if (widget is GestureDetector) return widget.onTap != null;
     return null;
   }
@@ -1275,75 +1607,313 @@ class TreeWalker {
     return best;
   }
 
-  /// Computes occlusion-aware visibility for [element].
+  /// Visibility of a locator's [matches] ([desc] names the locator in
+  /// reasons). Visible when any match is visible — or, with [nth], when
+  /// the nth distinct visible match exists (reading order; stacked copies
+  /// of one control count once). When nothing is visible the result
+  /// carries the reason for the first match in reading order, so a failed
+  /// wait or assertion says exactly why ("… is at opacity 0.00").
+  VisibilityResult _checkVisibility(
+    List<Element> matches,
+    String desc, {
+    int? nth,
+  }) {
+    if (matches.isEmpty) {
+      return VisibilityResult(
+        exists: false,
+        visible: false,
+        reason: 'no widget matches $desc',
+      );
+    }
+
+    final screen = _screenSize;
+    final layers = _routeLayers();
+    final ordered = inReadingOrder(matches);
+    if (ordered.isEmpty) {
+      return VisibilityResult(
+        exists: true,
+        visible: false,
+        info: extractInfo(matches.first),
+        reason: '$desc exists but is not laid out',
+      );
+    }
+
+    final visible = <(Element, VisibilityResult)>[];
+    VisibilityResult? firstHidden;
+    for (final element in ordered) {
+      final result = _visibilityOf(element, screen, layers, desc);
+      if (!result.visible) {
+        firstHidden ??= result;
+      } else if (!visible.any((v) => _sameStackedControl(v.$1, element))) {
+        visible.add((element, result));
+      }
+    }
+
+    if (nth != null) {
+      if (nth >= 0 && nth < visible.length) return visible[nth].$2;
+      return VisibilityResult(
+        exists: true,
+        visible: false,
+        onScreen: visible.isNotEmpty,
+        info: extractInfo(ordered.first),
+        reason: 'nth $nth is out of range for $desc: ${visible.length} '
+            'visible match(es)'
+            '${firstHidden?.reason != null ? ' (${firstHidden!.reason})' : ''}',
+      );
+    }
+    if (visible.isNotEmpty) return visible.first.$2;
+    return firstHidden!;
+  }
+
+  /// Whether [element] is visible to a person looking at the screen — the
+  /// single predicate shared by the `/screen` dump and every visibility
+  /// wait/assertion, so the two can never disagree:
   ///
-  /// `onScreen` is the rect-vs-viewport test; `obstructed` is true when the
-  /// element is on screen but a foreign widget is painted on top of its
-  /// center (see [_isUnobstructed]); `visible` (what every assertion /
-  /// wait / scroll check consumes) is `onScreen && !obstructed` — so an
-  /// element hidden under a nav bar / app bar / overlay is not "visible".
-  VisibilityResult _checkVisibility(Element? element) {
-    if (element == null) {
-      return const VisibilityResult(exists: false, visible: false);
-    }
-
+  ///  1. laid out and not under an active `Offstage`;
+  ///  2. painted at ≥ [_visibleOpacityThreshold] effective opacity;
+  ///  3. a non-empty rect after clipping to the screen and every clipping
+  ///     ancestor;
+  ///  4. not on a route hidden by a modal route above it, or being closed
+  ///     ([_RouteLayers]);
+  ///  5. not covered at every sample point ([_coverage]).
+  VisibilityResult _visibilityOf(
+    Element element,
+    Size? screen,
+    _RouteLayers layers,
+    String desc,
+  ) {
     final info = extractInfo(element);
-    final screenSize = _screenSize;
-    if (info.rect == null || screenSize == null) {
-      return VisibilityResult(exists: true, visible: false, info: info);
+    VisibilityResult hidden(String why, {bool onScreen = false}) =>
+        VisibilityResult(
+          exists: true,
+          visible: false,
+          onScreen: onScreen,
+          obstructed: onScreen,
+          info: info,
+          reason: '$desc exists but $why',
+        );
+
+    if (info.rect == null || screen == null) return hidden('is not laid out');
+    if (_isOffstage(element)) {
+      return hidden('is offstage (an inactive tab or a page kept alive '
+          'underneath)');
     }
-
-    final r = info.rect!;
-    final onScreen = r.x + r.width > 0 &&
-        r.x < screenSize.width &&
-        r.y + r.height > 0 &&
-        r.y < screenSize.height;
-    final obstructed = onScreen && !_isUnobstructed(element);
-
+    final opacity = _effectiveOpacity(element);
+    if (opacity < _visibleOpacityThreshold) {
+      return hidden('is at opacity ${opacity.toStringAsFixed(2)}');
+    }
+    final rect = _visibleRect(element, screen);
+    if (rect == null || rect.width <= 0 || rect.height <= 0) {
+      return hidden('is off-screen or clipped out of view');
+    }
+    if (layers.hides(element)) {
+      return hidden(
+        'is on a route hidden behind a dialog/sheet/page, or on a route '
+        'that is closing',
+        onScreen: true,
+      );
+    }
+    if (_coverage(element, screen) == _Coverage.covered) {
+      final center = rect.center;
+      final blocker = topmostHitTypeAt(element, center);
+      return hidden(
+        'is covered by ${blocker ?? 'another widget'} at every point',
+        onScreen: true,
+      );
+    }
     return VisibilityResult(
       exists: true,
-      visible: onScreen && !obstructed,
-      onScreen: onScreen,
-      obstructed: obstructed,
+      visible: true,
+      onScreen: true,
       info: info,
     );
   }
 
-  /// Whether [element]'s center is the frontmost thing painted there — i.e.
-  /// nothing from a different branch (nav bar, app bar, FAB, modal) sits on
-  /// top of it.
+  /// Whether [element] is not covered at every sample point — the
+  /// occlusion half of the dump's visibility gate (see [_coverage]).
+  bool _isUnobstructed(Element element) =>
+      _coverage(element, _screenSize) != _Coverage.covered;
+
+  /// How much of [element] a person can see past whatever is painted on
+  /// top of it, sampled at [_samplePoints] (its centre and four points
+  /// inset 25% into its visible rect).
   ///
-  /// Hit-tests at the element's center: the element is unobstructed when the
-  /// frontmost hit (`path.first`) is in the element's render lineage — the
-  /// element itself, a descendant, or an ancestor (the background behind
-  /// it). A frontmost hit from an unrelated branch means something is
-  /// painted on top → obstructed.
+  /// A point is clear when the frontmost hit there is in the element's own
+  /// render lineage (itself, a descendant, or an ancestor behind it), or is
+  /// a transparent input layer ([_isTransparentOverlay] — a
+  /// `Positioned.fill(InkWell)` over a card paints nothing). Clear at every
+  /// point → [_Coverage.clear]; at none → [_Coverage.covered]; otherwise
+  /// [_Coverage.partial], which the dump reports as `partial: true` instead
+  /// of silently dropping the element.
   ///
-  /// Defensive: returns true (cannot prove obstruction) when there is no
-  /// render object, no [RenderView] to hit-test, or an empty hit path —
-  /// we never falsely report occlusion. Note this is hit-test based, so a
-  /// pointer-transparent (`IgnorePointer`) overlay is not detected; real
-  /// bars/modals that absorb pointers are.
-  bool _isUnobstructed(Element element) {
+  /// Hit-test based, so a pointer-transparent (`IgnorePointer`) layer
+  /// painted on top is not detected; real bars and modals, which absorb
+  /// pointers, are.
+  _Coverage _coverage(Element element, Size? screen) {
     final targetRo = element.renderObject;
-    if (targetRo == null) return true;
-
-    final center = centerOfElement(element);
-    if (center == null) return true;
-
+    if (targetRo == null) return _Coverage.clear;
     final root = _rootRenderObject(targetRo);
-    if (root is! RenderView) return true;
+    if (root is! RenderView) return _Coverage.clear;
 
-    final result = HitTestResult();
-    root.hitTest(result, position: center);
-    if (result.path.isEmpty) return true;
-
-    final top = result.path.first.target;
-    if (top is! RenderObject) return true;
-
-    return _isRenderAncestorOrSelf(targetRo, top) ||
-        _isRenderAncestorOrSelf(top, targetRo);
+    final points = _samplePoints(element, screen: screen);
+    if (points.isEmpty) return _Coverage.clear;
+    var clear = 0;
+    for (final point in points) {
+      if (_pointClear(targetRo, root, point)) clear++;
+    }
+    if (clear == points.length) return _Coverage.clear;
+    return clear == 0 ? _Coverage.covered : _Coverage.partial;
   }
+
+  /// The points [_coverage] and [reachableTapPoint] sample on [element]:
+  /// its visible rect's centre first, then four points inset 25% towards
+  /// each corner. Empty when the element has no visible geometry.
+  List<Offset> _samplePoints(Element element, {Size? screen}) {
+    final rect = _visibleRect(element, screen ?? _screenSize);
+    if (rect == null || rect.width <= 0 || rect.height <= 0) return const [];
+    final dx = rect.width / 4;
+    final dy = rect.height / 4;
+    return [
+      rect.center,
+      rect.topLeft.translate(dx, dy),
+      rect.topRight.translate(-dx, dy),
+      rect.bottomLeft.translate(dx, -dy),
+      rect.bottomRight.translate(-dx, -dy),
+    ];
+  }
+
+  bool _pointClear(RenderObject target, RenderView root, Offset point) {
+    final result = HitTestResult();
+    root.hitTest(result, position: point);
+    // The frontmost render object hit. The path can start with non-render
+    // targets — a TextSpan under the pointer is a hit-test target of its
+    // own — which say nothing about what is painted there.
+    RenderObject? top;
+    for (final entry in result.path) {
+      final t = entry.target;
+      if (t is RenderObject) {
+        top = t;
+        break;
+      }
+    }
+    if (top == null) return true;
+    if (_isRenderAncestorOrSelf(target, top) ||
+        _isRenderAncestorOrSelf(top, target)) {
+      return true;
+    }
+    // A faded-out layer on top (Opacity 0, a finished fade-out kept for
+    // layout) still takes the hit but paints nothing over the target.
+    if (_renderOpacity(top) < _visibleOpacityThreshold) return true;
+    return _isTransparentOverlay(top, target);
+  }
+
+  /// Whether the branch that won the hit-test at a point over [target]
+  /// paints nothing there — it is only an input layer (a
+  /// `Positioned.fill(InkWell)` stretched over a card, a `GestureDetector`
+  /// catching taps for a whole tile). Checks the hit object's own subtree
+  /// and its ancestors up to (excluding) the first one that also contains
+  /// [target]; any painting render object in that branch is an occluder.
+  bool _isTransparentOverlay(RenderObject top, RenderObject target) {
+    var budget = _transparentScanBudget;
+    var paints = false;
+    void scan(RenderObject ro) {
+      if (paints || budget-- <= 0) {
+        // Out of budget: assume it paints — never claim a clear view that
+        // was not proven.
+        paints = true;
+        return;
+      }
+      if (_paintsContent(ro)) {
+        paints = true;
+        return;
+      }
+      ro.visitChildren(scan);
+    }
+
+    scan(top);
+    if (paints) return false;
+
+    var current = top.parent;
+    while (current is RenderObject) {
+      if (_isRenderAncestorOrSelf(current, target)) return true;
+      if (_paintsContent(current)) return false;
+      current = current.parent;
+    }
+    return false;
+  }
+
+  /// Render objects [_isTransparentOverlay] inspects before giving up.
+  static const int _transparentScanBudget = 64;
+
+  /// Whether [ro] paints visible content of its own (text, images,
+  /// decoration, fill, platform views…) rather than only passing pointers
+  /// or layout through.
+  bool _paintsContent(RenderObject ro) {
+    if (ro is RenderParagraph ||
+        ro is RenderEditable ||
+        ro is RenderImage ||
+        ro is RenderPhysicalModel ||
+        ro is RenderPhysicalShape ||
+        ro is RenderBackdropFilter ||
+        ro is TextureBox ||
+        ro is PlatformViewRenderBox) {
+      return true;
+    }
+    if (ro is RenderDecoratedBox) return true;
+    if (ro is RenderCustomPaint) {
+      return _painterPaints(ro.painter) || _painterPaints(ro.foregroundPainter);
+    }
+    final name = ro.runtimeType.toString();
+    return name.contains('ColoredBox') ||
+        name.contains('UiKitView') ||
+        name.contains('AndroidView');
+  }
+
+  /// Whether [painter] draws anything. Material wraps every surface —
+  /// including a transparent one around an `InkWell` overlay — in a
+  /// shape-border painter; a border with zero stroke dimensions (the
+  /// default `BorderSide.none`) draws nothing. The painter class is private
+  /// to the framework, so its `border` is read dynamically.
+  bool _painterPaints(CustomPainter? painter) {
+    if (painter == null) return false;
+    if (painter.runtimeType.toString() == '_ShapeBorderPainter') {
+      final Object? border = (painter as dynamic).border;
+      if (border is ShapeBorder) return border.dimensions != EdgeInsets.zero;
+    }
+    return true;
+  }
+
+  /// A snapshot of which routes are hidden right now (see [_RouteLayers]).
+  _RouteLayers _routeLayers() {
+    final routes = _modalRoutes();
+    final hidden = <ModalRoute<Object?>>{};
+    for (var i = 0; i < routes.length; i++) {
+      final route = routes[i];
+      if (route.animation?.status == AnimationStatus.reverse) {
+        hidden.add(route); // being closed
+        continue;
+      }
+      for (var j = i + 1; j < routes.length; j++) {
+        final above = routes[j];
+        if (!identical(above.navigator, route.navigator)) continue;
+        final status = above.animation?.status;
+        final shown = status == AnimationStatus.forward ||
+            status == AnimationStatus.completed;
+        if (shown && _hidesRoutesBelow(above)) {
+          hidden.add(route);
+          break;
+        }
+      }
+    }
+    return _RouteLayers(hidden);
+  }
+
+  /// Whether [route], once shown, hides the routes below it in its
+  /// navigator from a user: an opaque page, or any popup (dialog, bottom
+  /// sheet, menu) or barrier-carrying route — its barrier takes every
+  /// pointer outside it and dims what is underneath.
+  bool _hidesRoutesBelow(ModalRoute<Object?> route) =>
+      route.opaque || route is PopupRoute || route.barrierColor != null;
 
   /// The viewport size in **logical** pixels — the same coordinate space as
   /// element rects (which come from `RenderBox.localToGlobal`, logical px).
@@ -1389,8 +1959,15 @@ class TreeWalker {
   /// opacity via [RenderAnimatedOpacity]). ~0 means the user cannot see it even
   /// though it is laid out and hit-testable.
   double _effectiveOpacity(Element element) {
+    final ro = element.renderObject;
+    return ro == null ? 1.0 : _renderOpacity(ro);
+  }
+
+  /// Painted opacity of render object [start]: the product of every
+  /// [RenderOpacity] / [RenderAnimatedOpacity] from it up to the root.
+  double _renderOpacity(RenderObject start) {
     var opacity = 1.0;
-    RenderObject? ro = element.renderObject;
+    RenderObject? ro = start;
     while (ro != null && opacity > 0) {
       if (ro is RenderOpacity) {
         opacity *= ro.opacity;
@@ -1423,7 +2000,8 @@ class TreeWalker {
     while (parent is RenderObject) {
       if (_clips(parent) && parent is RenderBox && parent.hasSize) {
         try {
-          rect = rect.intersect(parent.localToGlobal(Offset.zero) & parent.size);
+          rect =
+              rect.intersect(parent.localToGlobal(Offset.zero) & parent.size);
         } on Exception {
           // An unattached ancestor can't clip — skip it.
         }
@@ -1557,5 +2135,113 @@ class TreeWalker {
     if (widget is Checkbox) return widget.value;
     if (widget is Switch) return widget.value;
     return null;
+  }
+}
+
+/// How much of an element is uncovered (see [TreeWalker._coverage]).
+enum _Coverage { clear, partial, covered }
+
+/// Which [ModalRoute]s are hidden from the user at one instant: a route
+/// that is closing (its primary animation reversing), or one with a
+/// shown opaque/popup/barrier route above it in the same navigator. An
+/// element is hidden when any route enclosing it is — a dialog on the
+/// root navigator hides a nested navigator's pages too.
+class _RouteLayers {
+  _RouteLayers(this._hidden);
+
+  final Set<ModalRoute<Object?>> _hidden;
+
+  /// Whether [element] sits on a hidden route.
+  bool hides(Element element) {
+    if (_hidden.isEmpty) return false;
+    var hidden = false;
+    element.visitAncestorElements((ancestor) {
+      final route = TreeWalker._routeOfScope(ancestor);
+      if (route != null && _hidden.contains(route)) {
+        hidden = true;
+        return false;
+      }
+      return true;
+    });
+    return hidden;
+  }
+
+  /// Whether the route owning the `_ModalScopeStatus` [scope] is hidden.
+  bool hidesScope(Element scope) {
+    final route = TreeWalker._routeOfScope(scope);
+    return route != null && _hidden.contains(route);
+  }
+}
+
+/// Computes, for dump nodes, the `nth` a text or semantics tap would need
+/// to reach them — using the tap gate's own candidate list
+/// ([TreeWalker.actableMatches]) — so a catalog ref resolves to exactly
+/// the widget it names even when its label repeats on screen.
+///
+/// Emitted as `text_nth`/`text_matches` and `semantics_nth`/
+/// `semantics_matches`, only when the label has more than one actable
+/// match and the node is one of them. Candidate lists are computed once
+/// per label per dump.
+class _NthIndex {
+  _NthIndex(this._walker);
+
+  final TreeWalker _walker;
+  final Map<String, List<(Element, Offset)>> _byText = {};
+  final Map<String, List<(Element, Offset)>> _bySemantics = {};
+
+  void annotate(
+    Element node,
+    Map<String, dynamic> out,
+    String? text,
+    String? semantics,
+  ) {
+    if (text != null && text.isNotEmpty) {
+      final candidates = _byText.putIfAbsent(text, () {
+        final matches = _walker.findAllElementsByText(text);
+        return matches.length > 1 ? _walker.actableMatches(matches) : const [];
+      });
+      _emit(node, out, 'text', candidates);
+    }
+    if (semantics != null) {
+      final candidates = _bySemantics.putIfAbsent(semantics, () {
+        final matches = _walker.findAllElementsBySemantics(semantics);
+        return matches.length > 1 ? _walker.actableMatches(matches) : const [];
+      });
+      _emit(node, out, 'semantics', candidates);
+    }
+  }
+
+  void _emit(
+    Element node,
+    Map<String, dynamic> out,
+    String prefix,
+    List<(Element, Offset)> candidates,
+  ) {
+    if (candidates.length < 2) return;
+    final index = candidates.indexWhere(
+      (c) => _related(c.$1, node),
+    );
+    if (index < 0) return;
+    out['${prefix}_nth'] = index;
+    out['${prefix}_matches'] = candidates.length;
+  }
+
+  /// Whether [a] and [b] are the same element or one encloses the other —
+  /// a button node's label is a Text leaf inside it; a node's semantics
+  /// may come from a Tooltip around it.
+  static bool _related(Element a, Element b) =>
+      _encloses(a, b) || _encloses(b, a);
+
+  static bool _encloses(Element ancestor, Element node) {
+    if (identical(ancestor, node)) return true;
+    var found = false;
+    node.visitAncestorElements((e) {
+      if (identical(e, ancestor)) {
+        found = true;
+        return false;
+      }
+      return true;
+    });
+    return found;
   }
 }

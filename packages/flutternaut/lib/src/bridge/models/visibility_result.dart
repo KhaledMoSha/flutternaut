@@ -24,6 +24,11 @@ class VisibilityResult {
   /// Full element info if the widget was found.
   final ElementInfo? info;
 
+  /// Why the widget is not visible (`"… is at opacity 0.00"`, `"… is
+  /// behind a modal route"`, …). Null when [visible], or when nothing
+  /// matched (see [exists]).
+  final String? reason;
+
   /// Creates a [VisibilityResult].
   const VisibilityResult({
     required this.exists,
@@ -31,6 +36,7 @@ class VisibilityResult {
     this.onScreen = false,
     this.obstructed = false,
     this.info,
+    this.reason,
   });
 
   /// Serializes this result to a JSON map.
@@ -43,11 +49,11 @@ class VisibilityResult {
       if (info?.rect != null) 'rect': info!.rect!.toJson(),
       if (info?.text != null) 'text': info!.text,
       if (info?.type != null && info!.type.isNotEmpty) 'type': info!.type,
+      if (reason != null) 'reason': reason,
     };
   }
 
   @override
-  String toString() =>
-      'VisibilityResult(exists: $exists, visible: $visible, '
+  String toString() => 'VisibilityResult(exists: $exists, visible: $visible, '
       'onScreen: $onScreen, obstructed: $obstructed)';
 }
