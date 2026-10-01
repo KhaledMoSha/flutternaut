@@ -99,11 +99,16 @@ class WaitHandler {
     final sw = Stopwatch()..start();
     String? detail;
     while (sw.elapsedMilliseconds < timeoutMs) {
-      final (met, why) = await _runner.run(check);
-      if (met) {
-        return WaitResult(success: true, elapsedMs: sw.elapsedMilliseconds);
+      final notDrawing = _runner.notDrawingReason;
+      if (notDrawing != null) {
+        detail = notDrawing;
+      } else {
+        final (met, why) = await _runner.run(check);
+        if (met) {
+          return WaitResult(success: true, elapsedMs: sw.elapsedMilliseconds);
+        }
+        detail = why;
       }
-      detail = why;
       await Future<void>.delayed(Duration(milliseconds: intervalMs));
     }
     return WaitResult(
@@ -113,19 +118,18 @@ class WaitHandler {
     );
   }
 
+  /// Polls [check] until it holds or [timeoutMs] passes. While the app
+  /// draws no frames (it is in the background) the check cannot run; the
+  /// wait keeps going — the app may be on its way back — and a timeout
+  /// then reports that as its `detail`.
   Future<WaitResult> _poll(
     bool Function() check, {
     int timeoutMs = 10000,
     int intervalMs = 200,
-  }) async {
-    final sw = Stopwatch()..start();
-    while (sw.elapsedMilliseconds < timeoutMs) {
-      final met = await _runner.run(check);
-      if (met) {
-        return WaitResult(success: true, elapsedMs: sw.elapsedMilliseconds);
-      }
-      await Future<void>.delayed(Duration(milliseconds: intervalMs));
-    }
-    return WaitResult(success: false, elapsedMs: sw.elapsedMilliseconds);
-  }
+  }) =>
+      _pollExplained(
+        () => (check(), null),
+        timeoutMs: timeoutMs,
+        intervalMs: intervalMs,
+      );
 }

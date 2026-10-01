@@ -1,4 +1,5 @@
 // ignore_for_file: deprecated_member_use
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -981,6 +982,110 @@ void main() {
       final node = scrollablesIn(walker.dumpVisibleTree()).single;
       expect(node['type'], 'SingleChildScrollView');
       expect(node['maxScrollExtent'], 0.0);
+    });
+
+    testWidgets(
+        'a PageView.builder with no itemCount (a looping carousel) reports '
+        'an unbounded forward extent the dump can encode', (tester) async {
+      await tester.pumpWidget(_app(
+        PageView.builder(
+          controller: PageController(initialPage: 10000),
+          itemBuilder: (_, i) => Text('page $i'),
+        ),
+      ));
+
+      final dump = walker.dumpVisibleTree();
+      final node = scrollablesIn(dump).single;
+      expect(node['type'], 'PageView');
+      expect(node['scrollOffset'], greaterThan(0));
+      expect(node['minScrollExtent'], 0.0);
+      expect(node.containsKey('maxScrollExtent'), isFalse);
+      expect(node['scrollUnboundedForward'], isTrue);
+      expect(node.containsKey('scrollUnboundedBack'), isFalse);
+      expect(() => jsonEncode(dump), returnsNormally);
+    });
+
+    testWidgets(
+        'a ListView.builder with no itemCount (an endless feed) reports an '
+        'unbounded forward extent the dump can encode', (tester) async {
+      await tester.pumpWidget(_app(
+        ListView.builder(
+          itemBuilder: (_, i) => SizedBox(height: 80, child: Text('row $i')),
+        ),
+      ));
+
+      final dump = walker.dumpVisibleTree();
+      final node = scrollablesIn(dump).single;
+      expect(node['scrollOffset'], 0.0);
+      expect(node.containsKey('maxScrollExtent'), isFalse);
+      expect(node['scrollUnboundedForward'], isTrue);
+      expect(() => jsonEncode(dump), returnsNormally);
+    });
+
+    testWidgets(
+        'a center-anchored list endless in both directions reports both '
+        'sides unbounded', (tester) async {
+      const center = ValueKey('center');
+      SliverList endless(String label) => SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (_, i) => SizedBox(height: 80, child: Text('$label $i')),
+            ),
+          );
+      await tester.pumpWidget(_app(
+        CustomScrollView(
+          center: center,
+          slivers: [
+            endless('before'),
+            SliverPadding(
+              key: center,
+              padding: EdgeInsets.zero,
+              sliver: endless('after'),
+            ),
+          ],
+        ),
+      ));
+
+      final dump = walker.dumpVisibleTree();
+      final node = scrollablesIn(dump).single;
+      expect(node['scrollOffset'], 0.0);
+      expect(node.containsKey('minScrollExtent'), isFalse);
+      expect(node.containsKey('maxScrollExtent'), isFalse);
+      expect(node['scrollUnboundedBack'], isTrue);
+      expect(node['scrollUnboundedForward'], isTrue);
+      expect(() => jsonEncode(dump), returnsNormally);
+    });
+
+    testWidgets(
+        'a center-anchored list with finite content before the center '
+        'reports its negative minScrollExtent', (tester) async {
+      const center = ValueKey('center');
+      await tester.pumpWidget(_app(
+        CustomScrollView(
+          center: center,
+          slivers: [
+            SliverList(
+              delegate: SliverChildListDelegate([
+                for (var i = 0; i < 5; i++)
+                  SizedBox(height: 80, child: Text('before $i')),
+              ]),
+            ),
+            SliverList(
+              key: center,
+              delegate: SliverChildListDelegate([
+                for (var i = 0; i < 30; i++)
+                  SizedBox(height: 80, child: Text('after $i')),
+              ]),
+            ),
+          ],
+        ),
+      ));
+
+      final node = scrollablesIn(walker.dumpVisibleTree()).single;
+      expect(node['scrollOffset'], 0.0);
+      expect(node['minScrollExtent'], -400.0);
+      expect(node['maxScrollExtent'], greaterThan(0));
+      expect(node.containsKey('scrollUnboundedBack'), isFalse);
+      expect(node.containsKey('scrollUnboundedForward'), isFalse);
     });
 
     testWidgets(

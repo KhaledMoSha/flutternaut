@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -107,6 +108,143 @@ void main() {
 
     test('require() passes when field present', () {
       expect(() => _req({'expected': 'x'}).require('expected'), returnsNormally);
+    });
+  });
+
+  // Every request must be answered: an unanswered one reaches the engine as
+  // a 15 s timeout that reads like a blocked app.
+  group('BridgeRouter.handle over a real socket', () {
+    late HttpServer server;
+    late HttpClient client;
+    final logged = <String>[];
+
+    Future<(int, Map<String, dynamic>)> call(
+      BridgeRouter router,
+      String method,
+      String path, {
+      String? body,
+    }) async {
+      server.listen(router.handle);
+      final request = await client
+          .open(method, InternetAddress.loopbackIPv4.address, server.port, path)
+          .timeout(const Duration(seconds: 5));
+      if (body != null) request.write(body);
+      final response =
+          await request.close().timeout(const Duration(seconds: 5));
+      final text = await utf8.decoder
+          .bind(response)
+          .join()
+          .timeout(const Duration(seconds: 5));
+      return (response.statusCode, jsonDecode(text) as Map<String, dynamic>);
+    }
+
+    setUp(() async {
+      logged.clear();
+      server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      client = HttpClient();
+    });
+
+    tearDown(() async {
+      client.close(force: true);
+      await server.close(force: true);
+    });
+
+    test('wraps handler data in the success envelope', () async {
+      final router = BridgeRouter(log: logged.add)
+        ..get('/screen', (_) => {'count': 1});
+
+      final (status, body) = await call(router, 'GET', '/screen');
+
+      expect(status, 200);
+      expect(body, {
+        'success': true,
+        'data': {'count': 1},
+      });
+    });
+
+    test(
+        'a non-finite number in the response is answered with a 500 that '
+        'names the field — not left unanswered', () async {
+      final router = BridgeRouter(log: logged.add)
+        ..get(
+          '/screen',
+          (_) => {
+            'elements': [
+              {
+                'type': 'PageView',
+                'children': [
+                  {'type': 'Scrollable', 'maxScrollExtent': double.infinity},
+                ],
+              },
+            ],
+          },
+        );
+
+      final (status, body) = await call(router, 'GET', '/screen');
+
+      expect(status, 500);
+      expect(body['success'], isFalse);
+      final error = body['error'] as String;
+      expect(error, startsWith('internal bridge error: '));
+      expect(error, contains('Infinity'));
+      expect(error, contains('"type":"Scrollable","maxScrollExtent":'));
+      expect(logged.single, contains('GET /screen'));
+    });
+
+    test('NaN is reported the same way', () async {
+      final router = BridgeRouter(log: logged.add)
+        ..get('/find', (_) => {'rect': {'x': double.nan}});
+
+      final (status, body) = await call(router, 'GET', '/find');
+
+      expect(status, 500);
+      expect(body['error'], contains('NaN'));
+      expect(body['error'], contains('"x":'));
+    });
+
+    test('an Error thrown by a handler is answered with a 500', () async {
+      final router = BridgeRouter(log: logged.add)
+        ..get('/screen', (_) => throw StateError('walker broke'));
+
+      final (status, body) = await call(router, 'GET', '/screen');
+
+      expect(status, 500);
+      expect(body['success'], isFalse);
+      expect(body['error'], 'internal bridge error: Bad state: walker broke');
+      expect(logged.single, contains('GET /screen'));
+    });
+
+    test('a JSON body that is not an object is answered with a 500',
+        () async {
+      var reached = false;
+      final router = BridgeRouter(log: logged.add)
+        ..post('/tap', (_) {
+          reached = true;
+          return {};
+        });
+
+      final (status, body) = await call(router, 'POST', '/tap', body: '[1,2]');
+
+      expect(status, 500);
+      expect(body['error'], startsWith('internal bridge error: '));
+      expect(reached, isFalse);
+    });
+
+    test('malformed JSON stays a 400', () async {
+      final router = BridgeRouter(log: logged.add)..post('/tap', (_) => {});
+
+      final (status, body) = await call(router, 'POST', '/tap', body: '{nope');
+
+      expect(status, 400);
+      expect(body['error'], startsWith('Invalid JSON'));
+    });
+
+    test('an unknown route is a 404', () async {
+      final (status, body) =
+          await call(BridgeRouter(log: logged.add), 'GET', '/nope');
+
+      expect(status, 404);
+      expect(body['error'], 'Not found: GET /nope');
     });
   });
 

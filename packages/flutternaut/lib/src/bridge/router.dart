@@ -75,7 +75,8 @@ class BridgeRequest {
 }
 
 /// Handler function signature: receives a parsed request, returns JSON response data.
-typedef RouteHandler = FutureOr<Map<String, dynamic>> Function(BridgeRequest req);
+typedef RouteHandler = FutureOr<Map<String, dynamic>> Function(
+    BridgeRequest req);
 
 /// HTTP method enum for typed route registration.
 enum RouteMethod {
@@ -144,7 +145,38 @@ class BridgeRouter {
     } on Exception catch (e, stack) {
       _log('[FlutternautBridge] $key: $e\n$stack');
       _fail(request, e.toString(), status: 500);
+    } on JsonUnsupportedObjectError catch (e, stack) {
+      // The handler returned a value JSON cannot carry (a non-finite number,
+      // an object with no `toJson`). The encoder's partial output ends at
+      // the offending field, so the answer names it.
+      final message = 'internal bridge error: the response holds a value '
+          'JSON cannot encode (${e.unsupportedObject})'
+          '${_encodedTail(e.partialResult)}';
+      _log('[FlutternautBridge] $key: $message\n$stack');
+      _fail(request, message, status: 500);
+    } on Error catch (e, stack) {
+      // `Error`s are not `Exception`s: a failed cast, a state error or a
+      // non-object JSON body would otherwise escape, leave the request
+      // unanswered and surface on the engine as a 15 s "the app is busy" —
+      // indistinguishable from a blocked UI thread. Answer it with what
+      // actually went wrong.
+      _log('[FlutternautBridge] $key: $e\n$stack');
+      _fail(request, 'internal bridge error: $e', status: 500);
     }
+  }
+
+  /// How many characters of the encoder's partial output an encoding
+  /// failure reports — enough to show the field and the node it sits in.
+  static const int _encodedTailLength = 160;
+
+  /// The end of the JSON written before an encoding failure, phrased for an
+  /// error message; empty when the encoder reported none.
+  static String _encodedTail(String? partial) {
+    if (partial == null || partial.isEmpty) return '';
+    final tail = partial.length <= _encodedTailLength
+        ? partial
+        : '…${partial.substring(partial.length - _encodedTailLength)}';
+    return ' after: $tail';
   }
 
   void _ok(HttpRequest request, Map<String, dynamic> data) {
@@ -161,7 +193,8 @@ class BridgeRouter {
     return jsonDecode(content) as Map<String, dynamic>;
   }
 
-  void _respond(HttpRequest request, Map<String, dynamic> data, {int status = 200}) {
+  void _respond(HttpRequest request, Map<String, dynamic> data,
+      {int status = 200}) {
     final encoded = jsonEncode(data);
     final bytes = utf8.encode(encoded);
     request.response

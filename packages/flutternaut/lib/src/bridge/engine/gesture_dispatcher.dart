@@ -31,7 +31,8 @@ class GestureDispatcher {
   ///
   /// Throws [ActionFailure] — never silently fails — when the target is
   /// missing, ambiguous, or not visible and tappable. See [resolveActable].
-  Future<bool> tap({
+  /// Returns a description of the widget the tap reached (see [_reachedAt]).
+  Future<String> tap({
     String? key,
     String? text,
     String? semantics,
@@ -43,12 +44,22 @@ class GestureDispatcher {
       semantics: semantics,
       nth: nth,
     );
+    final reached = _reachedAt(center);
 
     final session = _beginPointer(center);
     await _pumpFrames();
     await session.end(center);
-    return true;
+    return reached;
   }
+
+  /// A description of the widget a pointer at [point] reaches right now —
+  /// the control (or labelled widget) owning the frontmost hit, e.g.
+  /// `ElevatedButton "Check In"`. Read before the gesture is dispatched
+  /// (the gesture may rebuild the screen), so the caller can report what a
+  /// tap by locator actually landed on: a label resolved leniently may be
+  /// reached through a different widget than the one it names.
+  String _reachedAt(Offset point) =>
+      walker.probeTapAt(point).target ?? 'unknown widget';
 
   /// Taps the global logical point [at] — the explicit coordinate tap, for
   /// a target no locator can address. The point is still gated: off the
@@ -82,29 +93,32 @@ class GestureDispatcher {
   /// (e.g. a per-row trash button).
   ///
   /// Throws [ActionFailure] when the anchor is missing or ambiguous, [nth]
-  /// is out of range, or the control is not actually tappable.
-  Future<bool> tapNear(String anchorText, int nth) async {
+  /// is out of range, or the control is not actually tappable. Returns the
+  /// widget the tap reached (see [_reachedAt]).
+  Future<String> tapNear(String anchorText, int nth) async {
     final center = await resolveNearActable(anchorText, nth);
+    final reached = _reachedAt(center);
 
     final session = _beginPointer(center);
     await _pumpFrames();
     await session.end(center);
-    return true;
+    return reached;
   }
 
   /// Long-presses the [nth] unlabeled interactive control in the row of
   /// the unique on-screen text [anchorText] (see [tapNear]).
-  Future<bool> longPressNear(
+  Future<String> longPressNear(
     String anchorText,
     int nth, {
     Duration duration = const Duration(milliseconds: 600),
   }) async {
     final center = await resolveNearActable(anchorText, nth);
+    final reached = _reachedAt(center);
 
     final session = _beginPointer(center);
     await Future<void>.delayed(duration);
     await session.end(center, timeOffset: duration);
-    return true;
+    return reached;
   }
 
   /// Resolves the point to act on for a `near` locator: the [nth]
@@ -152,18 +166,19 @@ class GestureDispatcher {
   ///
   /// Goes through the same [resolveActable] confirm pipeline as [tap], so
   /// a substring match that is occluded or off-screen fails loudly rather
-  /// than reporting a false success.
-  Future<bool> tapByTextContains(String substring, {int? nth}) async {
+  /// than reporting a false success. Returns the widget the tap reached.
+  Future<String> tapByTextContains(String substring, {int? nth}) async {
     final center = await resolveActable(
       text: substring,
       contains: true,
       nth: nth,
     );
+    final reached = _reachedAt(center);
 
     final session = _beginPointer(center);
     await _pumpFrames();
     await session.end(center);
-    return true;
+    return reached;
   }
 
   /// Types [input] into a text field found by [key] or [text].
@@ -252,8 +267,9 @@ class GestureDispatcher {
   /// Long-presses a widget found by [key], [text] or [semantics]; [nth]
   /// disambiguates duplicates in reading order. Goes through the same
   /// confirm pipeline as [tap] — an occluded or ambiguous target throws
-  /// [ActionFailure] instead of pressing the wrong pixel.
-  Future<bool> longPress({
+  /// [ActionFailure] instead of pressing the wrong pixel. Returns the
+  /// widget the press reached (see [_reachedAt]).
+  Future<String> longPress({
     String? key,
     String? text,
     String? semantics,
@@ -266,11 +282,12 @@ class GestureDispatcher {
       semantics: semantics,
       nth: nth,
     );
+    final reached = _reachedAt(center);
 
     final session = _beginPointer(center);
     await Future<void>.delayed(duration);
     await session.end(center, timeOffset: duration);
-    return true;
+    return reached;
   }
 
   /// Taps a widget [count] times with [intervalMs] between each tap.

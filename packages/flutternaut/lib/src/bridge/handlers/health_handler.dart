@@ -11,7 +11,7 @@ import '../router.dart';
 class HealthHandler {
   /// Bridge protocol version. Bump when the request/response shapes change
   /// so clients can detect incompatibility.
-  static const String protocolVersion = '1.1.0';
+  static const String protocolVersion = '1.2.0';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

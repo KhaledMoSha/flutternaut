@@ -1234,6 +1234,13 @@ class TreeWalker {
   ///
   /// Metrics are omitted (never reported as zeros) when the scroll position
   /// is not attached or has no content dimensions yet.
+  ///
+  /// An extent is reported only when it is a finite number. A lazily built
+  /// list with no item count (`ListView.builder` / `PageView.builder`
+  /// without `itemCount`, a looping carousel) has an infinite
+  /// `maxScrollExtent`, and a center-anchored endless list an infinite
+  /// negative `minScrollExtent`; JSON cannot carry infinity, so those sides
+  /// are stated as `scrollUnboundedForward` / `scrollUnboundedBack` instead.
   void _applyScrollInfo(
     Element element,
     Scrollable widget,
@@ -1254,8 +1261,20 @@ class TreeWalker {
     if (position != null &&
         position.hasPixels &&
         position.hasContentDimensions) {
-      node['scrollOffset'] = position.pixels;
-      node['maxScrollExtent'] = position.maxScrollExtent;
+      final pixels = position.pixels;
+      final minExtent = position.minScrollExtent;
+      final maxExtent = position.maxScrollExtent;
+      if (pixels.isFinite) node['scrollOffset'] = pixels;
+      if (minExtent.isFinite) {
+        node['minScrollExtent'] = minExtent;
+      } else if (minExtent == double.negativeInfinity) {
+        node['scrollUnboundedBack'] = true;
+      }
+      if (maxExtent.isFinite) {
+        node['maxScrollExtent'] = maxExtent;
+      } else if (maxExtent == double.infinity) {
+        node['scrollUnboundedForward'] = true;
+      }
     }
 
     var hops = 0;

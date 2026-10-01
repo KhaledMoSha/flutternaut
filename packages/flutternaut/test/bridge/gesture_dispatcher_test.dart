@@ -53,7 +53,7 @@ void main() {
 
       final ok = await _pumpAndAwait(tester, () => dispatcher.tap(key: 'btn'));
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
     });
 
@@ -71,7 +71,7 @@ void main() {
         () => dispatcher.tap(text: 'Sign In'),
       );
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
     });
 
@@ -92,12 +92,11 @@ void main() {
         () => dispatcher.tap(text: 'Sign in to continue'),
       );
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
     });
 
-    testWidgets('taps a rich label by a substring (contains)',
-        (tester) async {
+    testWidgets('taps a rich label by a substring (contains)', (tester) async {
       var tapped = false;
       await tester.pumpWidget(_app(
         GestureDetector(
@@ -114,7 +113,7 @@ void main() {
         () => dispatcher.tapByTextContains('Log in'),
       );
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
     });
 
@@ -191,7 +190,8 @@ void main() {
   });
 
   group('typeText by sibling label', () {
-    testWidgets('writes into the field below the label, not the '
+    testWidgets(
+        'writes into the field below the label, not the '
         'currently-focused field', (tester) async {
       final firstName = TextEditingController();
       final phone = TextEditingController();
@@ -341,8 +341,7 @@ void main() {
       expect(changes.last, '0791');
     });
 
-    testWidgets('clearText fires onChanged with empty string',
-        (tester) async {
+    testWidgets('clearText fires onChanged with empty string', (tester) async {
       final controller = TextEditingController(text: 'preset');
       final changes = <String>[];
       await tester.pumpWidget(_app(
@@ -454,7 +453,8 @@ void main() {
   });
 
   group('route transitions', () {
-    testWidgets('a tap during a route pop fails loudly instead of landing '
+    testWidgets(
+        'a tap during a route pop fails loudly instead of landing '
         'on nothing', (tester) async {
       var tapped = false;
       final nav = GlobalKey<NavigatorState>();
@@ -598,8 +598,7 @@ void main() {
       expect(tapped, isTrue);
     });
 
-    testWidgets('falls back to a case-insensitive label match',
-        (tester) async {
+    testWidgets('falls back to a case-insensitive label match', (tester) async {
       var tapped = false;
       await tester.pumpWidget(_app(Tooltip(
         message: 'Open menu',
@@ -628,8 +627,7 @@ void main() {
   group('typing into a focused / hidden field (OTP pattern)', () {
     // A PinCodeTextField-style widget: the real input is invisible under
     // a row of digit boxes; tapping a box focuses the hidden field.
-    Widget otp(TextEditingController controller, FocusNode node) =>
-        _app(Stack(
+    Widget otp(TextEditingController controller, FocusNode node) => _app(Stack(
           children: [
             Opacity(
               opacity: 0,
@@ -713,7 +711,8 @@ void main() {
       expect(controller.text, '99');
     });
 
-    testWidgets('typeText into an unfocused hidden field still fails as '
+    testWidgets(
+        'typeText into an unfocused hidden field still fails as '
         'occluded (the gate is intact)', (tester) async {
       final controller = TextEditingController();
       final node = FocusNode();
@@ -727,6 +726,93 @@ void main() {
             .having((e) => e.message, 'message', contains('occluded'))),
       );
       expect(controller.text, isEmpty);
+    });
+  });
+
+  group('reports the widget a gesture reached', () {
+    testWidgets('a tap by key names the control and its label', (tester) async {
+      await tester.pumpWidget(_app(
+        ElevatedButton(
+          key: const ValueKey('go'),
+          onPressed: () {},
+          child: const Text('Continue'),
+        ),
+      ));
+
+      final reached =
+          await _pumpAndAwait(tester, () => dispatcher.tap(key: 'go'));
+
+      expect(reached, contains('"Continue"'));
+    });
+
+    testWidgets('tap by text, contains, near and long press report it too',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        Column(children: [
+          ElevatedButton(onPressed: () {}, child: const Text('Add to bag')),
+          Row(children: [
+            const Text('Item Title 1'),
+            IconButton(onPressed: () {}, icon: const Icon(Icons.delete)),
+          ]),
+        ]),
+      ));
+
+      expect(
+        await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Add to bag')),
+        contains('"Add to bag"'),
+      );
+      expect(
+        await _pumpAndAwait(
+            tester, () => dispatcher.tapByTextContains('to bag')),
+        contains('"Add to bag"'),
+      );
+      expect(
+        await _pumpAndAwait(
+            tester, () => dispatcher.longPress(text: 'Add to bag')),
+        contains('"Add to bag"'),
+      );
+      expect(
+        await _pumpAndAwait(
+            tester, () => dispatcher.tapNear('Item Title 1', 0)),
+        isNotEmpty,
+      );
+      expect(
+        await _pumpAndAwait(
+            tester, () => dispatcher.longPressNear('Item Title 1', 0)),
+        isNotEmpty,
+      );
+    });
+
+    testWidgets(
+        'a label reached through another widget names that widget, not the '
+        'label', (tester) async {
+      // A plain Text is only a locator, so its gate is lenient: the tap goes
+      // to whatever owns the pixel. When that is a layer on top (a splash, a
+      // scrim), the tap passes — and the report must say what it really hit,
+      // so a green step that landed on the cover is visible as such.
+      var coverTapped = false;
+      await tester.pumpWidget(_app(
+        Stack(
+          children: [
+            const Center(child: Text('Continue')),
+            Positioned.fill(
+              child: GestureDetector(
+                key: const ValueKey('cover'),
+                behavior: HitTestBehavior.opaque,
+                onTap: () => coverTapped = true,
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ],
+        ),
+      ));
+
+      final reached =
+          await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Continue'));
+
+      expect(coverTapped, isTrue);
+      expect(reached, isNot(contains('Continue')));
+      expect(reached, contains('GestureDetector'));
     });
   });
 
@@ -804,7 +890,7 @@ void main() {
       // but built, so ensureVisible can bring it into view.
       final ok = await _pumpAndAwait(tester, () => dispatcher.tap(key: 'deep'));
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
     });
 
@@ -825,7 +911,7 @@ void main() {
       final ok =
           await _pumpAndAwait(tester, () => dispatcher.tap(text: 'dd/mm/yyyy'));
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(focusNode.hasFocus, isTrue,
           reason: 'tapping the hint should focus the field');
     });
@@ -861,7 +947,7 @@ void main() {
       final ok =
           await _pumpAndAwait(tester, () => dispatcher.tap(key: 'more_tab'));
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
       expect(pages.offset, 0.0,
           reason: 'a tap must not move a PageView the user cannot scroll');
@@ -894,7 +980,7 @@ void main() {
       final ok =
           await _pumpAndAwait(tester, () => dispatcher.tap(key: 'visible'));
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
       expect(scroll.offset, 300.0,
           reason: 'an already-visible target needs no scrolling');
@@ -937,12 +1023,11 @@ void main() {
       final ok =
           await _pumpAndAwait(tester, () => dispatcher.tap(key: 'deep_right'));
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
       expect(scroll.offset, greaterThan(0),
           reason: 'the vertical list must scroll to reveal the target');
-      expect(pages.offset, 0.0,
-          reason: 'the locked PageView must stay put');
+      expect(pages.offset, 0.0, reason: 'the locked PageView must stay put');
     });
 
     testWidgets('confirms a target reached via a descendant hit',
@@ -960,9 +1045,10 @@ void main() {
         ),
       ));
 
-      final ok = await _pumpAndAwait(tester, () => dispatcher.tap(key: 'outer'));
+      final ok =
+          await _pumpAndAwait(tester, () => dispatcher.tap(key: 'outer'));
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(tapped, isTrue);
     });
   });
@@ -972,7 +1058,10 @@ void main() {
         (tester) async {
       await tester.pumpWidget(_app(
         ListView(
-          children: [for (var i = 0; i < 30; i++) SizedBox(height: 80, child: Text('row $i'))],
+          children: [
+            for (var i = 0; i < 30; i++)
+              SizedBox(height: 80, child: Text('row $i'))
+          ],
         ),
       ));
 
@@ -997,7 +1086,8 @@ void main() {
                 ],
               ),
             ),
-            for (var i = 0; i < 30; i++) SizedBox(height: 80, child: Text('row $i')),
+            for (var i = 0; i < 30; i++)
+              SizedBox(height: 80, child: Text('row $i')),
           ],
         ),
       ));
@@ -1018,7 +1108,8 @@ void main() {
       );
     });
 
-    testWidgets('a same-axis scrollable that cannot move (a nav bar) does '
+    testWidgets(
+        'a same-axis scrollable that cannot move (a nav bar) does '
         'not make the choice ambiguous', (tester) async {
       await tester.pumpWidget(_app(Column(
         children: [
@@ -1054,7 +1145,10 @@ void main() {
         (tester) async {
       await tester.pumpWidget(_app(
         ListView(
-          children: [for (var i = 0; i < 30; i++) SizedBox(height: 80, child: Text('row $i'))],
+          children: [
+            for (var i = 0; i < 30; i++)
+              SizedBox(height: 80, child: Text('row $i'))
+          ],
         ),
       ));
 
@@ -1242,8 +1336,7 @@ void main() {
       expect(ok, isTrue);
       expect(second.offset, greaterThan(0),
           reason: 'the indexed rail must scroll');
-      expect(first.offset, 0,
-          reason: 'the sibling rail must stay put');
+      expect(first.offset, 0, reason: 'the sibling rail must stay put');
     });
 
     testWidgets('index matches the dump\'s scrollIndex ordering',
@@ -1328,12 +1421,11 @@ void main() {
         () => dispatcher.tapNear('Item Title 10', 0),
       );
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(deleted, ['Item Title 10']);
     });
 
-    testWidgets('nth picks among same-row icons left-to-right',
-        (tester) async {
+    testWidgets('nth picks among same-row icons left-to-right', (tester) async {
       final taps = <String>[];
       await tester.pumpWidget(_app(
         SizedBox(
@@ -1399,7 +1491,7 @@ void main() {
         tester,
         () => dispatcher.tapNear('Item Title 12', 0),
       );
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(taps, greaterThan(0));
     });
 
@@ -1460,7 +1552,7 @@ void main() {
         () => dispatcher.tapNear('Item Title 9', 0),
       );
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(taps, ['delete']);
     });
 
@@ -1486,7 +1578,7 @@ void main() {
         () => dispatcher.longPressNear('Item Title 9', 0),
       );
 
-      expect(ok, isTrue);
+      expect(ok, isNotEmpty);
       expect(longPressed, isTrue);
     });
 

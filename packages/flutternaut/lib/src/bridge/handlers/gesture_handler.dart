@@ -73,11 +73,11 @@ class GestureHandler {
     final near = req.string('near');
     if (near != null) {
       final nth = req.integer('nth');
-      final success = await _runner.run(() => _gesture.tapNear(near, nth));
+      final hit = await _runner.run(() => _gesture.tapNear(near, nth));
       return ActionResult(
         action: 'tap',
-        success: success,
-        extras: {'near': near, 'nth': nth},
+        success: true,
+        extras: {'near': near, 'nth': nth, 'hit': hit},
       ).toJson();
     }
 
@@ -88,7 +88,9 @@ class GestureHandler {
     final match = req.string('match') ?? 'exact';
     final nth = _optionalNth(req);
 
-    final success = await _runner.run(() {
+    // `hit` names the widget the tap reached — the caller's confirmation
+    // of where a tap by locator landed (as for `at`).
+    final hit = await _runner.run(() {
       if (key == null && text != null && match == 'contains') {
         return _gesture.tapByTextContains(text, nth: nth);
       }
@@ -101,8 +103,8 @@ class GestureHandler {
     });
     return ActionResult(
       action: 'tap',
-      success: success,
-      extras: _locatorEcho(key, text, semantics, nth),
+      success: true,
+      extras: {...?_locatorEcho(key, text, semantics, nth), 'hit': hit},
     ).toJson();
   }
 
@@ -175,13 +177,13 @@ class GestureHandler {
     final near = req.string('near');
     if (near != null) {
       final nth = req.integer('nth');
-      final success = await _runner.run(
+      final hit = await _runner.run(
         () => _gesture.longPressNear(near, nth, duration: duration),
       );
       return ActionResult(
         action: 'long_press',
-        success: success,
-        extras: {'near': near, 'nth': nth},
+        success: true,
+        extras: {'near': near, 'nth': nth, 'hit': hit},
       ).toJson();
     }
 
@@ -190,7 +192,7 @@ class GestureHandler {
     final text = req.string('text');
     final semantics = req.string('semantics');
     final nth = _optionalNth(req);
-    final success = await _runner.run(
+    final hit = await _runner.run(
       () => _gesture.longPress(
         key: key,
         text: text,
@@ -201,8 +203,8 @@ class GestureHandler {
     );
     return ActionResult(
       action: 'long_press',
-      success: success,
-      extras: _locatorEcho(key, text, semantics, nth),
+      success: true,
+      extras: {...?_locatorEcho(key, text, semantics, nth), 'hit': hit},
     ).toJson();
   }
 
