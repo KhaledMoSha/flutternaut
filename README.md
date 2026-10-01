@@ -34,4 +34,7 @@ dart run flutternaut
 
 ## License
 
-MIT
+[Functional Source License 1.1, MIT Future License](packages/flutternaut/LICENSE) (FSL-1.1-MIT). Source-available: you may
+use, modify and redistribute it for any purpose, including in commercial apps, except to offer a
+competing product or service. Each version becomes available under the MIT license two years after its
+release.

@@ -1,7 +1,7 @@
 # flutternaut
 
 [![pub package](https://img.shields.io/pub/v/flutternaut.svg)](https://pub.dev/packages/flutternaut)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE)
 
 An in-app HTTP bridge that lets external test engines interact with the Flutter widget tree directly — no Appium, no accessibility layer required.
 
@@ -134,4 +134,7 @@ iOS simulators share the host network, so no forwarding is needed there.
 
 ## License
 
-MIT
+[Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). Source-available: you may
+use, modify and redistribute it for any purpose, including in commercial apps, except to offer a
+competing product or service. Each version becomes available under the MIT license two years after its
+release.

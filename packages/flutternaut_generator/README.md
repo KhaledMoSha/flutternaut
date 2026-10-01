@@ -1,7 +1,7 @@
 # flutternaut_generator
 
 [![pub package](https://img.shields.io/pub/v/flutternaut_generator.svg)](https://pub.dev/packages/flutternaut_generator)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: FSL-1.1-MIT](https://img.shields.io/badge/License-FSL--1.1--MIT-blue.svg)](LICENSE)
 
 A CLI tool that walks a Flutter project's AST for classes annotated with `@FlutternautView`, collects every `ValueKey` inside each one, and writes them to a JSON file grouped by view. The Flutternaut desktop **Test Editor** reads this file to offer per-screen target dropdowns and row-aware list helpers.
 
@@ -111,4 +111,7 @@ The legacy `flutternaut_generator:` key is still read as a fallback. The `-o` CL
 
 ## License
 
-MIT
+[Functional Source License 1.1, MIT Future License](LICENSE) (FSL-1.1-MIT). Source-available: you may
+use, modify and redistribute it for any purpose, including in commercial apps, except to offer a
+competing product or service. Each version becomes available under the MIT license two years after its
+release.
