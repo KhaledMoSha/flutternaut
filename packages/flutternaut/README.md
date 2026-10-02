@@ -77,12 +77,29 @@ The bridge is designed to pair with the Flutternaut engine (written in Go), whic
 
 ```dart
 await FlutternautBridge.ensureInitialized(
-  port: 8500,          // default; the engine forwards this port
+  port: 8500,          // default; see "Which port the bridge uses"
   enabled: !kReleaseMode, // false disables the bridge without removing the call
 );
 ```
 
-Both parameters are optional. `ensureInitialized()` is idempotent — safe to call multiple times; subsequent calls are ignored if the server is already running. `FlutternautBridge.instance` returns the running bridge and `FlutternautBridge.isRunning` reports its state.
+Both parameters are optional. `ensureInitialized()` is idempotent — safe to call multiple times; subsequent calls are ignored if the server is already running. `FlutternautBridge.instance` returns the running bridge, `FlutternautBridge.instance.isRunning` reports its state and `FlutternautBridge.instance.port` the port it is bound to.
+
+### Which port the bridge uses
+
+In order, the first that applies:
+
+1. the `FLUTTERNAUT_BRIDGE_PORT` environment variable of the app's process;
+2. the `port:` argument;
+3. `8500`.
+
+**You do not need to do anything about the variable.** The Flutternaut engine sets it when it launches your app, and only where it has to: iOS simulators share the Mac's network stack, so two simulators' apps cannot both listen on 8500, and the engine gives each simulator its own port to run them side by side. Your `main()` is compiled long before the engine picks a port, which is why the environment wins over the `port:` argument. On Android each device has its own network, the variable is normally absent, and the bridge stays on 8500 (if something does set it, it is honoured the same way).
+
+The bridge fails loudly rather than listen somewhere the engine is not looking. `ensureInitialized()` throws a `FlutternautBridgeException` and the bridge stays stopped when:
+
+- `FLUTTERNAUT_BRIDGE_PORT` is set to something that is not a TCP port (digits only, 1–65535) — it never falls back to 8500;
+- the chosen port is already in use — the message names the port and where it came from (the variable, the argument or the default). On the default port that usually means another simulator's app is already serving the bridge.
+
+`GET /health` reports where a bridge is: `port` (the port it is bound to) and, on an iOS simulator, `device_id` (that simulator's UDID).
 
 **Security:** the server binds `0.0.0.0` (all interfaces) so emulators, simulators and USB-forwarded devices can reach it, and the package has **no built-in build-mode gate**. Always wrap the call in `kDebugMode` (or pass `enabled: !kReleaseMode`) so a release build never exposes the bridge.
 

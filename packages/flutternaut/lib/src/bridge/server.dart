@@ -2,10 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
+import 'bridge_port.dart';
 import 'engine/gesture_dispatcher.dart';
 import 'engine/main_thread_runner.dart';
 import 'engine/tree_walker.dart';
 import 'handlers/handlers.dart';
+import 'process_environment.dart';
 import 'router.dart';
 
 /// HTTP server that runs inside a Flutter app and exposes the widget tree
@@ -19,7 +21,8 @@ import 'router.dart';
 /// the [HttpServer] lifecycle.
 class BridgeServer {
   final void Function(String) _log;
-  final BridgeRouter _router;
+  final InternetAddress _address;
+  late final BridgeRouter _router;
 
   HttpServer? _server;
 
@@ -30,35 +33,80 @@ class BridgeServer {
   /// guarantees every component reads from the same tree.
   ///
   /// [runner] and [log] are optional — defaults are provided.
+  /// [environment] is where `/health` reads the simulator UDID from;
+  /// [address] is the interface to bind (all IPv4 interfaces by default).
   BridgeServer({
     TreeWalker? walker,
     MainThreadRunner? runner,
     void Function(String)? log,
+    EnvironmentReader environment = readProcessEnvironment,
+    InternetAddress? address,
   })  : _log = log ?? debugPrint,
-        _router = _buildBridgeRouter(
-          walker: walker ?? TreeWalker(),
-          runner: runner ?? MainThreadRunner(),
-          log: log ?? debugPrint,
-        );
+        _address = address ?? InternetAddress.anyIPv4 {
+    _router = _buildBridgeRouter(
+      walker: walker ?? TreeWalker(),
+      runner: runner ?? MainThreadRunner(),
+      log: _log,
+      environment: environment,
+      boundPort: () => _server?.port,
+    );
+  }
 
   /// Whether the server is currently bound and listening.
   bool get isRunning => _server != null;
 
-  /// Starts the server on the given [port].
+  /// The port the server is bound to; null while it is not running.
+  int? get port => _server?.port;
+
+  /// Routes one request. Exposed so tests can serve the router on a socket
+  /// of their own.
+  @visibleForTesting
+  BridgeRouter get router => _router;
+
+  /// Starts the server on [port].
   ///
-  /// No-op if already running. Rethrows any bind failure after logging.
-  Future<void> start({int port = 8500}) async {
+  /// No-op if already running. A port that cannot be bound throws a
+  /// [FlutternautBridgeException] saying which port, where it came from and
+  /// — for the default port — the likely reason; it is logged first.
+  Future<void> start(BridgePort port) async {
     if (_server != null) return;
 
+    final HttpServer server;
     try {
-      _server = await HttpServer.bind(InternetAddress.anyIPv4, port);
-      _log('[FlutternautBridge] Server started on port $port');
-      _server!.listen(_router.handle);
-    } catch (e, stack) {
-      _log('[FlutternautBridge] Failed to start on port $port: $e\n$stack');
-      _server = null;
-      rethrow;
+      server = await HttpServer.bind(_address, port.port);
+    } on SocketException catch (e) {
+      final failure = FlutternautBridgeException(
+        _bindFailure(port, e),
+        cause: e,
+      );
+      _log('[FlutternautBridge] ${failure.message}');
+      throw failure;
     }
+    _server = server;
+    _log('[FlutternautBridge] Server started on port ${server.port} '
+        '(${port.origin})');
+    server.listen(_router.handle);
+  }
+
+  static String _bindFailure(BridgePort port, SocketException e) {
+    final reason = e.osError?.message ?? e.message;
+    final base = 'FlutternautBridge could not bind port ${port.port} '
+        '(${port.origin}): $reason.';
+    return switch (port.source) {
+      BridgePortSource.defaultPort =>
+        '$base Another app is probably already serving the bridge on '
+            '${port.port}: iOS simulators share the Mac\'s network stack, so '
+            'only one app across all booted simulators (and the Mac itself) '
+            'can hold a port. Stop the other app, or run this one through '
+            'the Flutternaut engine, which gives each simulator its own '
+            'port through $bridgePortVariable.',
+      BridgePortSource.argument =>
+        '$base Something else is listening on it; stop that process or '
+            'pass a different port.',
+      BridgePortSource.environment =>
+        '$base Whoever set the variable must choose a port nothing else '
+            'is listening on, then relaunch the app.',
+    };
   }
 
   /// Stops the server and releases the port.
@@ -76,11 +124,18 @@ class BridgeServer {
     required TreeWalker walker,
     required MainThreadRunner runner,
     required void Function(String) log,
+    required EnvironmentReader environment,
+    required int? Function() boundPort,
   }) {
     final dispatcher = GestureDispatcher(walker);
     final router = BridgeRouter(log: log);
 
-    HealthHandler(walker: walker, runner: runner).register(router);
+    HealthHandler(
+      walker: walker,
+      runner: runner,
+      environment: environment,
+      boundPort: boundPort,
+    ).register(router);
     FindHandler(walker: walker, runner: runner).register(router);
     GestureHandler(gesture: dispatcher, runner: runner).register(router);
     QueryHandler(walker: walker, runner: runner).register(router);

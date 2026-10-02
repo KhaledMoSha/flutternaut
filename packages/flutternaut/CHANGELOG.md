@@ -1,3 +1,12 @@
+## Unreleased
+
+* The bridge port can be chosen at launch: when the `FLUTTERNAUT_BRIDGE_PORT` environment variable is set in the app's process, the bridge binds that port instead of the `port:` argument or the default 8500. The Flutternaut engine sets it per iOS simulator (they share the Mac's ports) so several simulators can run tests at once. Nothing to change in your app.
+* A `FLUTTERNAUT_BRIDGE_PORT` that is not a TCP port (digits only, 1–65535) makes `ensureInitialized()` throw a `FlutternautBridgeException`; the bridge never falls back to 8500.
+* A port that cannot be bound now throws a `FlutternautBridgeException` that names the port, where it came from (environment variable, argument or default) and, for the default, the likely cause — another simulator's app already serving the bridge. Previously the raw `SocketException` was rethrown.
+* `GET /health` adds `port` (the port the bridge is bound to) and, on an iOS simulator, `device_id` (the simulator's UDID, from `SIMULATOR_UDID`; absent on physical devices, Android and desktop). Bridge protocol 1.3.0.
+* `ensureInitialized({int? port})` — `port` is now nullable (omitted = 8500, as before); `FlutternautBridge.defaultPort`, `FlutternautBridge.instance.port` and `FlutternautBridgeException` are new.
+* The environment is read with C `getenv` through `dart:ffi` on iOS, where `Platform.environment` is empty. No new dependency. `dart:ffi` sits behind a conditional import, so an app that also targets the web keeps compiling (the bridge itself does not run on the web).
+
 ## 0.0.6 — 2026-04-10
 
 * Add `topics` to pubspec.yaml for pub.dev discoverability.
