@@ -33,6 +33,27 @@ Future<T> _pumpAndAwait<T>(
   return completer.future;
 }
 
+/// Clears `debugCreator` on every render object of the pumped tree — the
+/// state of a profile or release build, where Flutter only sets it inside an
+/// assert. The bridge runs in every build mode, so the gate and its messages
+/// must not depend on it. Call it after the last pump before the action
+/// (a rebuild sets it again in a debug test run).
+void _dropDebugCreators(WidgetTester tester) {
+  final root = tester.binding.rootElement;
+  if (root == null) fail('no root element: pump a widget first');
+  var cleared = 0;
+  void visit(Element element) {
+    if (element is RenderObjectElement) {
+      element.renderObject.debugCreator = null;
+      cleared++;
+    }
+    element.visitChildren(visit);
+  }
+
+  visit(root);
+  expect(cleared, greaterThan(0));
+}
+
 void main() {
   late GestureDispatcher dispatcher;
 
@@ -110,11 +131,95 @@ void main() {
 
       final ok = await _pumpAndAwait(
         tester,
-        () => dispatcher.tapByTextContains('Log in'),
+        () => dispatcher.tapByTextMatch('Log in', TextMatch.contains),
       );
 
       expect(ok, isNotEmpty);
       expect(tapped, isTrue);
+    });
+
+    testWidgets(
+        'taps the label that starts with the text (starts_with), not one '
+        'that only contains it', (tester) async {
+      final taps = <String>[];
+      await tester.pumpWidget(_app(Column(children: [
+        GestureDetector(
+          onTap: () => taps.add('infix'),
+          child: const Text('Start Free Trial'),
+        ),
+        GestureDetector(
+          onTap: () => taps.add('prefix'),
+          child: const Text('Free Trial'),
+        ),
+      ])));
+
+      final reached = await _pumpAndAwait(
+        tester,
+        () => dispatcher.tapByTextMatch('FREE', TextMatch.startsWith),
+      );
+
+      expect(reached, contains('"Free Trial"'));
+      expect(taps, ['prefix']);
+    });
+
+    testWidgets('a starts_with miss names the comparison', (tester) async {
+      await tester.pumpWidget(_app(const Text('Start Free Trial')));
+
+      await expectLater(
+        dispatcher.tapByTextMatch('Free', TextMatch.startsWith),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          'No element found matching text starting with "Free".',
+        )),
+      );
+    });
+
+    Widget bags(List<String> taps) => _app(Column(children: [
+          GestureDetector(
+            onTap: () => taps.add('first'),
+            child: const Text('Bag · 1'),
+          ),
+          GestureDetector(
+            onTap: () => taps.add('second'),
+            child: const Text('Bag · 2'),
+          ),
+        ]));
+
+    testWidgets(
+        'two labels starting with the text are ambiguous, and the error '
+        'offers nth', (tester) async {
+      final taps = <String>[];
+      await tester.pumpWidget(bags(taps));
+
+      await expectLater(
+        dispatcher.tapByTextMatch('bag', TextMatch.startsWith),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+            contains('Ambiguous locator text starting with "bag"'),
+            contains('nth 0'),
+            contains('nth 1'),
+            contains('Pass nth'),
+          ),
+        )),
+      );
+      expect(taps, isEmpty);
+    });
+
+    testWidgets('nth picks among labels starting with the text',
+        (tester) async {
+      final taps = <String>[];
+      await tester.pumpWidget(bags(taps));
+
+      final reached = await _pumpAndAwait(
+        tester,
+        () => dispatcher.tapByTextMatch('Bag', TextMatch.startsWith, nth: 1),
+      );
+
+      expect(reached, contains('"Bag · 2"'));
+      expect(taps, ['second']);
     });
 
     testWidgets('throws ActionFailure for missing element', (tester) async {
@@ -405,6 +510,61 @@ void main() {
       );
 
       expect(longPressed, isTrue);
+    });
+
+    // `/long_press` used to drop `match`, so a contains locator was matched
+    // exactly and missed. The mode now reaches the confirm pipeline.
+    Widget pressables(List<String> pressed) => _app(Column(children: [
+          GestureDetector(
+            onLongPress: () => pressed.add('order'),
+            child: const Text('Order #1042 · pending'),
+          ),
+          GestureDetector(
+            onLongPress: () => pressed.add('reorder'),
+            child: const Text('Reorder last basket'),
+          ),
+        ]));
+
+    testWidgets('honours contains', (tester) async {
+      final pressed = <String>[];
+      await tester.pumpWidget(pressables(pressed));
+
+      final reached = await _pumpAndAwait(
+        tester,
+        () => dispatcher.longPress(text: '#1042', match: TextMatch.contains),
+      );
+
+      expect(reached, contains('"Order #1042 · pending"'));
+      expect(pressed, ['order']);
+    });
+
+    testWidgets('honours starts_with', (tester) async {
+      final pressed = <String>[];
+      await tester.pumpWidget(pressables(pressed));
+
+      // "order" is inside both labels, but only one starts with it.
+      final reached = await _pumpAndAwait(
+        tester,
+        () => dispatcher.longPress(text: 'order', match: TextMatch.startsWith),
+      );
+
+      expect(reached, contains('"Order #1042 · pending"'));
+      expect(pressed, ['order']);
+    });
+
+    testWidgets('stays exact by default', (tester) async {
+      final pressed = <String>[];
+      await tester.pumpWidget(pressables(pressed));
+
+      await expectLater(
+        dispatcher.longPress(text: '#1042'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          'No element found matching text "#1042".',
+        )),
+      );
+      expect(pressed, isEmpty);
     });
   });
 
@@ -762,8 +922,8 @@ void main() {
         contains('"Add to bag"'),
       );
       expect(
-        await _pumpAndAwait(
-            tester, () => dispatcher.tapByTextContains('to bag')),
+        await _pumpAndAwait(tester,
+            () => dispatcher.tapByTextMatch('to bag', TextMatch.contains)),
         contains('"Add to bag"'),
       );
       expect(
@@ -786,10 +946,11 @@ void main() {
     testWidgets(
         'a label reached through another widget names that widget, not the '
         'label', (tester) async {
-      // A plain Text is only a locator, so its gate is lenient: the tap goes
-      // to whatever owns the pixel. When that is a layer on top (a splash, a
-      // scrim), the tap passes — and the report must say what it really hit,
-      // so a green step that landed on the cover is visible as such.
+      // A plain Text is only a locator: when a transparent input layer owns
+      // its pixels (a tap-catcher stretched over a tile, painting nothing),
+      // the tap goes to that layer, as a person's would — and the report
+      // must say what it really hit. A cover that PAINTS is refused instead
+      // (see 'pointer swallowed or covered before the target').
       var coverTapped = false;
       await tester.pumpWidget(_app(
         Stack(
@@ -1050,6 +1211,455 @@ void main() {
 
       expect(ok, isNotEmpty);
       expect(tapped, isTrue);
+    });
+  });
+
+  group('pointer swallowed or covered before the target', () {
+    testWidgets(
+        'a splash held in an AbsorbPointer over the page refuses the tap, '
+        'then the tap lands once it is gone', (tester) async {
+      // The Beanz onboarding: the page (and its Continue button) is built
+      // under `Positioned.fill(AbsorbPointer(splash))`. The frontmost
+      // recorded hit is the Stack — an ancestor of the label — which used to
+      // pass the lenient label gate while the tap did nothing.
+      final held = ValueNotifier(true);
+      addTearDown(held.dispose);
+      var pressed = false;
+      await tester.pumpWidget(_app(ValueListenableBuilder<bool>(
+        valueListenable: held,
+        builder: (_, isHeld, __) => Stack(
+          fit: StackFit.expand,
+          children: [
+            Center(
+              child: InkWell(
+                onTap: () => pressed = true,
+                child: const Text('Continue'),
+              ),
+            ),
+            if (isHeld)
+              const Positioned.fill(
+                child: AbsorbPointer(
+                  child: ColoredBox(color: Color(0xFF6FA8DC)),
+                ),
+              ),
+          ],
+        ),
+      )));
+
+      await expectLater(
+        dispatcher.tap(text: 'Continue'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('AbsorbPointer(ColoredBox)'), contains('occluded')),
+        )),
+      );
+      expect(pressed, isFalse, reason: 'the splash must not swallow a "pass"');
+
+      held.value = false;
+      await tester.pump();
+      final reached =
+          await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Continue'));
+      expect(pressed, isTrue);
+      expect(reached, contains('"Continue"'));
+    });
+
+    testWidgets('a transparent absorber over a label refuses the tap',
+        (tester) async {
+      var pressed = false;
+      await tester.pumpWidget(_app(Stack(children: [
+        Center(
+          child: InkWell(
+            onTap: () => pressed = true,
+            child: const Text('Save'),
+          ),
+        ),
+        const Positioned.fill(child: AbsorbPointer(child: SizedBox.expand())),
+      ])));
+
+      await expectLater(
+        dispatcher.tap(text: 'Save'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('takes no taps'), contains('AbsorbPointer(SizedBox)')),
+        )),
+      );
+      expect(pressed, isFalse);
+    });
+
+    testWidgets(
+        'an absorbing AbsorbPointer around the control refuses, and taps once '
+        'it stops absorbing', (tester) async {
+      final absorbing = ValueNotifier(true);
+      addTearDown(absorbing.dispose);
+      var pressed = false;
+      await tester.pumpWidget(_app(Center(
+        child: ValueListenableBuilder<bool>(
+          valueListenable: absorbing,
+          builder: (_, value, __) => AbsorbPointer(
+            absorbing: value,
+            child: InkWell(
+              onTap: () => pressed = true,
+              child: const Text('Save'),
+            ),
+          ),
+        ),
+      )));
+
+      await expectLater(
+        dispatcher.tap(text: 'Save'),
+        throwsA(isA<ActionFailure>()
+            .having((e) => e.message, 'message', contains('takes no taps'))),
+      );
+      expect(pressed, isFalse);
+
+      absorbing.value = false;
+      await tester.pump();
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Save'));
+      expect(pressed, isTrue);
+    });
+
+    testWidgets(
+        'a list that is still scrolling refuses a row tap without moving it, '
+        'and the row is tapped once the scroll settles', (tester) async {
+      // A Scrollable ignores pointers on its content while a scroll animates
+      // or flings: a real tap then only stops the scroll.
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      String? opened;
+      await tester.pumpWidget(_app(ListView(
+        controller: scroll,
+        children: [
+          for (var i = 0; i < 40; i++)
+            SizedBox(
+              height: 60,
+              child: InkWell(
+                onTap: () => opened = 'Row $i',
+                child: Text('Row $i'),
+              ),
+            ),
+        ],
+      )));
+
+      unawaited(scroll.animateTo(
+        30,
+        duration: const Duration(seconds: 2),
+        curve: Curves.linear,
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      final offsetMidScroll = scroll.offset;
+
+      await expectLater(
+        dispatcher.tap(text: 'Row 2'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('still scrolling'),
+        )),
+      );
+      expect(opened, isNull);
+      expect(scroll.offset, offsetMidScroll,
+          reason: 'a refused tap must not jump the list mid-scroll');
+
+      await tester.pumpAndSettle();
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Row 2'));
+      expect(opened, 'Row 2');
+    });
+
+    testWidgets(
+        'right after a navigation the Navigator absorbs the tap; once input '
+        'is accepted again the tap lands', (tester) async {
+      final nav = GlobalKey<NavigatorState>();
+      var pressed = false;
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: nav,
+        home: Scaffold(
+          body: Center(
+            child: InkWell(
+              onTap: () => pressed = true,
+              child: const Text('Order'),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // A navigation between frames: Navigator._cancelActivePointers sets
+      // its AbsorbPointer until the next build.
+      unawaited(nav.currentState!.push(MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('details')),
+      )));
+
+      await expectLater(
+        dispatcher.tap(text: 'Order'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('Navigator'),
+        )),
+      );
+      expect(pressed, isFalse);
+
+      await tester.pumpAndSettle();
+      nav.currentState!.pop();
+      await tester.pumpAndSettle();
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Order'));
+      expect(pressed, isTrue);
+    });
+
+    testWidgets(
+        'a field its tap handler wraps in an AbsorbPointer is tapped by its '
+        'label and by its hint (date picker idiom)', (tester) async {
+      var opened = 0;
+      await tester.pumpWidget(_app(Center(
+        child: SizedBox(
+          width: 300,
+          child: InkWell(
+            onTap: () => opened++,
+            child: const AbsorbPointer(
+              child: TextField(
+                decoration: InputDecoration(
+                  labelText: 'Birthday',
+                  hintText: 'dd/mm/yyyy',
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                ),
+              ),
+            ),
+          ),
+        ),
+      )));
+
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Birthday'));
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'dd/mm/yyyy'));
+      expect(opened, 2);
+    });
+
+    testWidgets(
+        'an opaque GestureDetector wrapping an AbsorbPointer field is tapped '
+        '(dropdown idiom)', (tester) async {
+      var opened = false;
+      await tester.pumpWidget(_app(Center(
+        child: SizedBox(
+          width: 300,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => opened = true,
+            child: const AbsorbPointer(
+              child: TextField(
+                decoration: InputDecoration(hintText: 'Pick a city'),
+              ),
+            ),
+          ),
+        ),
+      )));
+
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Pick a city'));
+      expect(opened, isTrue);
+    });
+
+    testWidgets(
+        'an opaque handler over a label that ignores pointers is tapped',
+        (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(_app(Center(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => tapped = true,
+          child: const IgnorePointer(child: Text('Go')),
+        ),
+      )));
+
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Go'));
+      expect(tapped, isTrue);
+    });
+
+    testWidgets(
+        'a deferring handler over a label that ignores pointers is refused '
+        '(the tap would reach nothing)', (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(_app(Center(
+        child: GestureDetector(
+          onTap: () => tapped = true,
+          child: const IgnorePointer(child: Text('Go')),
+        ),
+      )));
+
+      await expectLater(
+        dispatcher.tap(text: 'Go'),
+        throwsA(isA<ActionFailure>()
+            .having((e) => e.message, 'message', contains('takes no taps'))),
+      );
+      expect(tapped, isFalse);
+    });
+
+    testWidgets(
+        'a page-wide handler around a painted loading layer does not make '
+        'a blocked control tappable', (tester) async {
+      var dismissed = false;
+      var paid = false;
+      await tester.pumpWidget(_app(GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => dismissed = true,
+        child: ColoredBox(
+          color: const Color(0xFFFFFFFF),
+          child: IgnorePointer(
+            child: Center(
+              child: InkWell(
+                onTap: () => paid = true,
+                child: const Text('Pay'),
+              ),
+            ),
+          ),
+        ),
+      )));
+
+      await expectLater(
+        dispatcher.tap(text: 'Pay'),
+        throwsA(isA<ActionFailure>()
+            .having((e) => e.message, 'message', contains('takes no taps'))),
+      );
+      expect(dismissed, isFalse);
+      expect(paid, isFalse);
+    });
+
+    testWidgets('a long press under an absorbing layer is refused',
+        (tester) async {
+      var held = false;
+      await tester.pumpWidget(_app(Center(
+        child: AbsorbPointer(
+          child: GestureDetector(
+            onLongPress: () => held = true,
+            child: const Text('Hold'),
+          ),
+        ),
+      )));
+
+      await expectLater(
+        dispatcher.longPress(text: 'Hold'),
+        throwsA(isA<ActionFailure>()),
+      );
+      expect(held, isFalse);
+    });
+
+    testWidgets('a painted tap-catching cover over a label refuses the tap',
+        (tester) async {
+      var coverTapped = false;
+      await tester.pumpWidget(_app(Stack(children: [
+        const Center(child: Text('Continue')),
+        Positioned.fill(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => coverTapped = true,
+            child: const ColoredBox(color: Color(0xFF6FA8DC)),
+          ),
+        ),
+      ])));
+
+      await expectLater(
+        dispatcher.tap(text: 'Continue'),
+        throwsA(isA<ActionFailure>()
+            .having((e) => e.message, 'message', contains('occluded'))),
+      );
+      expect(coverTapped, isFalse);
+    });
+  });
+
+  group('profile/release builds (no debugCreator)', () {
+    testWidgets('a field its tap handler wraps is still tapped by its label',
+        (tester) async {
+      var opened = false;
+      await tester.pumpWidget(_app(Center(
+        child: SizedBox(
+          width: 300,
+          child: InkWell(
+            onTap: () => opened = true,
+            child: const AbsorbPointer(
+              child: TextField(
+                decoration: InputDecoration(
+                  labelText: 'Birthday',
+                  floatingLabelBehavior: FloatingLabelBehavior.always,
+                ),
+              ),
+            ),
+          ),
+        ),
+      )));
+      _dropDebugCreators(tester);
+
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Birthday'));
+      expect(opened, isTrue);
+    });
+
+    testWidgets('a splash refusal still names the layer', (tester) async {
+      await tester.pumpWidget(_app(Stack(fit: StackFit.expand, children: [
+        Center(child: InkWell(onTap: () {}, child: const Text('Continue'))),
+        const Positioned.fill(
+          child: AbsorbPointer(child: ColoredBox(color: Color(0xFF6FA8DC))),
+        ),
+      ])));
+      _dropDebugCreators(tester);
+
+      await expectLater(
+        dispatcher.tap(text: 'Continue'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('AbsorbPointer(ColoredBox)'),
+        )),
+      );
+    });
+
+    testWidgets('a scrolling-list refusal still says the list is scrolling',
+        (tester) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      await tester.pumpWidget(_app(ListView(
+        controller: scroll,
+        children: [
+          for (var i = 0; i < 40; i++)
+            SizedBox(
+              height: 60,
+              child: InkWell(onTap: () {}, child: Text('Row $i')),
+            ),
+        ],
+      )));
+      unawaited(scroll.animateTo(
+        30,
+        duration: const Duration(seconds: 2),
+        curve: Curves.linear,
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      _dropDebugCreators(tester);
+
+      await expectLater(
+        dispatcher.tap(text: 'Row 2'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('still scrolling'),
+        )),
+      );
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a tap reports the same control as in a debug build',
+        (tester) async {
+      await tester.pumpWidget(_app(Center(
+        child: ElevatedButton(onPressed: () {}, child: const Text('Continue')),
+      )));
+      final inDebug =
+          await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Continue'));
+
+      await tester.pumpAndSettle();
+      _dropDebugCreators(tester);
+      final inRelease =
+          await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Continue'));
+
+      expect(inRelease, contains('"Continue"'));
+      expect(inRelease, inDebug);
     });
   });
 

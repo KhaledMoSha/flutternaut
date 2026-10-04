@@ -399,4 +399,174 @@ void main() {
       );
     });
   });
+
+  group('layers that swallow the pointer (AbsorbPointer)', () {
+    // A splash held over a page that is already built underneath — the
+    // Beanz onboarding pattern. AbsorbPointer takes the pointer without
+    // joining the hit path, so the frontmost recorded hit is the Stack: an
+    // ancestor of the label. That must not read as "nothing on top".
+    Widget splashOver(Widget page, {required bool held}) => _app(Stack(
+          fit: StackFit.expand,
+          children: [
+            page,
+            if (held)
+              const Positioned.fill(
+                child: AbsorbPointer(
+                  child: ColoredBox(color: Color(0xFF6FA8DC)),
+                ),
+              ),
+          ],
+        ));
+
+    testWidgets('a painted splash in an AbsorbPointer hides the page under it',
+        (tester) async {
+      await tester.pumpWidget(
+        splashOver(const Center(child: Text('Continue')), held: true),
+      );
+
+      final result = walker.checkTextVisible('Continue');
+      expect(result.visible, isFalse);
+      expect(result.reason, contains('covered by AbsorbPointer(ColoredBox)'));
+      expect(nodes().map((n) => n['text']), isNot(contains('Continue')));
+
+      await tester.pumpWidget(
+        splashOver(const Center(child: Text('Continue')), held: false),
+      );
+      expect(walker.checkTextVisible('Continue').visible, isTrue);
+      expect(nodes().map((n) => n['text']), contains('Continue'));
+    });
+
+    testWidgets('a transparent AbsorbPointer over a label hides nothing',
+        (tester) async {
+      await tester.pumpWidget(_app(const Stack(children: [
+        Center(child: Text('Behind glass')),
+        Positioned.fill(child: AbsorbPointer(child: SizedBox.expand())),
+      ])));
+
+      expect(walker.checkTextVisible('Behind glass').visible, isTrue);
+    });
+
+    testWidgets('an AbsorbPointer wrapping the label hides nothing',
+        (tester) async {
+      await tester.pumpWidget(_app(const Center(
+        child: AbsorbPointer(child: Text('Busy form')),
+      )));
+
+      expect(walker.checkTextVisible('Busy form').visible, isTrue);
+    });
+
+    testWidgets('a faded-out absorbing cover hides nothing', (tester) async {
+      await tester.pumpWidget(_app(const Stack(children: [
+        Center(child: Text('Revealed')),
+        Positioned.fill(
+          child: Opacity(
+            opacity: 0,
+            child: AbsorbPointer(child: ColoredBox(color: Color(0xFF000000))),
+          ),
+        ),
+      ])));
+
+      expect(walker.checkTextVisible('Revealed').visible, isTrue);
+    });
+
+    testWidgets('an absorbing cover painted elsewhere does not hide a label',
+        (tester) async {
+      // A full-screen absorber whose only paint is a small badge in a
+      // corner: the label's pixels are not painted over.
+      await tester.pumpWidget(_app(const Stack(children: [
+        Center(child: Text('Mid screen')),
+        Positioned.fill(
+          child: AbsorbPointer(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: ColoredBox(color: Color(0xFF000000)),
+              ),
+            ),
+          ),
+        ),
+      ])));
+
+      expect(walker.checkTextVisible('Mid screen').visible, isTrue);
+    });
+  });
+
+  group('an empty field under its hint', () {
+    testWidgets('the hint of an empty field is visible; typed text hides it',
+        (tester) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(_app(Center(
+        child: SizedBox(
+          width: 300,
+          child: TextField(
+            controller: controller,
+            decoration: const InputDecoration(hintText: 'Search'),
+          ),
+        ),
+      )));
+
+      expect(walker.checkTextVisible('Search').visible, isTrue);
+
+      controller.text = 'latte';
+      await tester.pump();
+      expect(walker.checkTextVisible('Search').visible, isFalse);
+    });
+  });
+
+  group('tap_at on a layer that swallows the pointer', () {
+    testWidgets('a point on an AbsorbPointer splash fails loudly',
+        (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(_app(Stack(fit: StackFit.expand, children: [
+        Center(
+          child: ElevatedButton(
+            onPressed: () => tapped = true,
+            child: const Text('Continue'),
+          ),
+        ),
+        const Positioned.fill(
+          child: AbsorbPointer(child: ColoredBox(color: Color(0xFF6FA8DC))),
+        ),
+      ])));
+      final center = tester.getCenter(find.byType(ElevatedButton));
+
+      await expectLater(
+        dispatcher.tapAt(center),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('swallowed'), contains('AbsorbPointer(ColoredBox)')),
+        )),
+      );
+      expect(tapped, isFalse);
+    });
+
+    testWidgets('a field wrapped by its tap handler is tapped', (tester) async {
+      // The date-picker idiom: InkWell(child: AbsorbPointer(field)). The
+      // absorber exists so the handler around it gets the tap.
+      var opened = false;
+      await tester.pumpWidget(_app(Center(
+        child: SizedBox(
+          width: 300,
+          child: InkWell(
+            onTap: () => opened = true,
+            child: const AbsorbPointer(
+              child: TextField(
+                decoration: InputDecoration(hintText: 'dd/mm/yyyy'),
+              ),
+            ),
+          ),
+        ),
+      )));
+      final center = tester.getCenter(find.byType(TextField));
+
+      final hit = await _pumpAndAwait(tester, () => dispatcher.tapAt(center));
+      expect(opened, isTrue);
+      // An InkWell is named by the GestureDetector it builds on.
+      expect(hit, contains('GestureDetector'));
+    });
+  });
 }

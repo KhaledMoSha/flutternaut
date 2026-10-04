@@ -46,7 +46,7 @@ Future<(int, Map<String, dynamic>)> _get(int port, String path) {
 
 /// A port nothing is listening on right now.
 Future<int> _freePort() async {
-  final socket = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+  final socket = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
   final port = socket.port;
   await socket.close();
   return port;
@@ -213,7 +213,7 @@ void main() {
       );
       expect(data['status'], 'ok');
       expect(data['bridge'], 'flutternaut');
-      expect(data['protocol_version'], '1.3.0');
+      expect(data['protocol_version'], '1.4.0');
       expect(data['instance_id'], matches(RegExp(r'^[0-9a-f]{16}$')));
       expect(data['port'], server.port);
       expect(data['first_frame'], isA<bool>());
@@ -348,7 +348,7 @@ void main() {
       expect(data['device_id'], 'SIM-1');
       // Nothing listens on the argument's port.
       final probe =
-          await ServerSocket.bind(InternetAddress.anyIPv4, fromArgument);
+          await ServerSocket.bind(InternetAddress.loopbackIPv4, fromArgument);
       await probe.close();
     });
 
@@ -385,14 +385,14 @@ void main() {
       expect(FlutternautBridge.instance.port, isNull);
       // It did not quietly bind the argument's port instead.
       final probe =
-          await ServerSocket.bind(InternetAddress.anyIPv4, fromArgument);
+          await ServerSocket.bind(InternetAddress.loopbackIPv4, fromArgument);
       await probe.close();
     });
 
     test(
         'a port in use throws, leaves the bridge stopped, and a later call '
         'can start it', () async {
-      final holder = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+      final holder = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       final held = holder.port;
       final environment = _env({'FLUTTERNAUT_BRIDGE_PORT': '$held'});
 
@@ -419,6 +419,22 @@ void main() {
       expect(FlutternautBridge.instance.port, held);
     });
 
+    test('listens on the loopback interface unless told otherwise', () async {
+      await FlutternautBridge.start(port: await _freePort(), environment: _env());
+
+      expect(FlutternautBridge.instance.address, InternetAddress.loopbackIPv4);
+    });
+
+    test('bindAddress opts in to another interface', () async {
+      await FlutternautBridge.start(
+        port: await _freePort(),
+        bindAddress: InternetAddress.anyIPv4,
+        environment: _env(),
+      );
+
+      expect(FlutternautBridge.instance.address, InternetAddress.anyIPv4);
+    });
+
     test('disabled: nothing starts and the environment is not read', () async {
       await FlutternautBridge.start(
         enabled: false,
@@ -436,6 +452,39 @@ void main() {
       );
 
       expect(FlutternautBridge.instance.port, first);
+    });
+  });
+
+  group('bind failures', () {
+    test(
+        'permission denied names the Android INTERNET permission, not '
+        'another app on the port', () {
+      final message = BridgeServer.bindFailure(
+        resolveBridgePort(argument: null, environment: _env()),
+        const SocketException(
+          'Failed to create server socket',
+          osError: OSError('Permission denied', 13),
+        ),
+      );
+
+      expect(message, contains('could not bind port 8500'));
+      expect(message, contains('android.permission.INTERNET'));
+      expect(message, contains('src/main/AndroidManifest.xml'));
+      expect(message, isNot(contains('Another app')));
+    });
+
+    test('an address in use on the default port still points at another app',
+        () {
+      final message = BridgeServer.bindFailure(
+        resolveBridgePort(argument: null, environment: _env()),
+        const SocketException(
+          'Failed to create server socket',
+          osError: OSError('Address already in use', 48),
+        ),
+      );
+
+      expect(message, contains('Another app'));
+      expect(message, isNot(contains('INTERNET')));
     });
   });
 }

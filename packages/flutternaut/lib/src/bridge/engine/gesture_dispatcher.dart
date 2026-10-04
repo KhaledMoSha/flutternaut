@@ -63,8 +63,9 @@ class GestureDispatcher {
 
   /// Taps the global logical point [at] — the explicit coordinate tap, for
   /// a target no locator can address. The point is still gated: off the
-  /// screen, or where no widget receives pointers (a route transition in
-  /// progress, empty space), throws [ActionFailure]. Returns a description
+  /// screen, where no widget receives pointers (a route transition in
+  /// progress, empty space), or where a layer swallows the pointer before
+  /// anything handles it (an `AbsorbPointer` splash), throws [ActionFailure]. Returns a description
   /// of the widget the tap reached, so the caller can confirm it hit what
   /// it meant to.
   Future<String> tapAt(Offset at) async {
@@ -79,6 +80,13 @@ class GestureDispatcher {
         'No widget receives pointers at ${_fmtOffset(at)}: either nothing '
         'is there, or a route transition is in progress (Flutter ignores '
         'pointers until it ends — run wait_idle, then retry).',
+      );
+    }
+    final absorbedBy = probe.absorbedBy;
+    if (absorbedBy != null) {
+      throw ActionFailure(
+        'The pointer at ${_fmtOffset(at)} is swallowed by $absorbedBy — '
+        'nothing handles a tap there right now.',
       );
     }
     final session = _beginPointer(at);
@@ -162,15 +170,23 @@ class GestureDispatcher {
     );
   }
 
-  /// Taps a widget whose text contains [substring] (case-insensitive).
+  /// Taps a widget whose own text matches [text] in [match] mode — equal
+  /// (case-sensitive), containing it or starting with it (both
+  /// case-insensitive); see [TextMatch]. [nth] disambiguates duplicates in
+  /// reading order.
   ///
   /// Goes through the same [resolveActable] confirm pipeline as [tap], so
-  /// a substring match that is occluded or off-screen fails loudly rather
-  /// than reporting a false success. Returns the widget the tap reached.
-  Future<String> tapByTextContains(String substring, {int? nth}) async {
+  /// a fuzzy match that is ambiguous, occluded or off-screen fails loudly
+  /// rather than reporting a false success. Returns the widget the tap
+  /// reached.
+  Future<String> tapByTextMatch(
+    String text,
+    TextMatch match, {
+    int? nth,
+  }) async {
     final center = await resolveActable(
-      text: substring,
-      contains: true,
+      text: text,
+      match: match,
       nth: nth,
     );
     final reached = _reachedAt(center);
@@ -264,15 +280,17 @@ class GestureDispatcher {
     return true;
   }
 
-  /// Long-presses a widget found by [key], [text] or [semantics]; [nth]
-  /// disambiguates duplicates in reading order. Goes through the same
-  /// confirm pipeline as [tap] — an occluded or ambiguous target throws
-  /// [ActionFailure] instead of pressing the wrong pixel. Returns the
-  /// widget the press reached (see [_reachedAt]).
+  /// Long-presses a widget found by [key], [text] or [semantics]; [match]
+  /// is how [text] is compared (see [TextMatch]) and [nth] disambiguates
+  /// duplicates in reading order. Goes through the same confirm pipeline
+  /// as [tap] — an occluded or ambiguous target throws [ActionFailure]
+  /// instead of pressing the wrong pixel. Returns the widget the press
+  /// reached (see [_reachedAt]).
   Future<String> longPress({
     String? key,
     String? text,
     String? semantics,
+    TextMatch match = TextMatch.exact,
     int? nth,
     Duration duration = const Duration(milliseconds: 600),
   }) async {
@@ -280,6 +298,7 @@ class GestureDispatcher {
       key: key,
       text: text,
       semantics: semantics,
+      match: match,
       nth: nth,
     );
     final reached = _reachedAt(center);
@@ -531,8 +550,8 @@ class GestureDispatcher {
   /// reporting success when nothing — or the wrong widget — was hit.
   ///
   /// Pipeline:
-  ///   1. Resolve every element matching [key], [text] (exact, unless
-  ///      [contains] for the text-substring path) or [semantics].
+  ///   1. Resolve every element matching [key], [text] (compared in
+  ///      [match] mode — see [TextMatch]) or [semantics].
   ///   2. Single match → scroll it into view (best-effort), settle, then
   ///      confirm it is genuinely tappable via a real hit-test.
   ///   3. Multiple matches → only those currently on-screen AND hittable
@@ -545,15 +564,20 @@ class GestureDispatcher {
     String? key,
     String? text,
     String? semantics,
-    bool contains = false,
+    TextMatch match = TextMatch.exact,
     int? nth,
   }) async {
-    final desc = _describeLocator(key: key, text: text, semantics: semantics);
+    final desc = _describeLocator(
+      key: key,
+      text: text,
+      semantics: semantics,
+      match: match,
+    );
     final matches = _matchingElements(
       key: key,
       text: text,
       semantics: semantics,
-      contains: contains,
+      match: match,
     );
 
     if (matches.isEmpty) {
@@ -658,44 +682,39 @@ class GestureDispatcher {
     String? key,
     String? text,
     String? semantics,
-    bool contains = false,
+    TextMatch match = TextMatch.exact,
   }) {
     if (key != null) return walker.findAllElementsByKey(key);
-    if (text != null) {
-      return contains
-          ? walker.findAllElementsByTextContains(text)
-          : walker.findAllElementsByText(text);
-    }
+    if (text != null) return walker.findAllElementsByTextMatch(text, match);
     if (semantics != null) return walker.findAllElementsBySemantics(semantics);
     return const [];
   }
 
   /// Confirms the single matched [element] is tappable, returning the point
-  /// to tap, or throwing [ActionFailure] explaining why it is not.
+  /// to tap, or throwing [ActionFailure] explaining why it is not (see
+  /// [TreeWalker.tapReach]). The engine re-tries a refused step for its
+  /// timeout, so a refusal that names a passing state (a splash, a scroll, a
+  /// navigation) resolves on its own; one that does not is a real finding.
   Offset _confirmHittable(Element element, String desc) {
-    final point = walker.reachableTapPoint(element);
-    if (point != null) return point;
-
-    final center = walker.centerOfElement(element);
-    if (center == null) {
-      throw ActionFailure(
-        '$desc exists but has no on-screen geometry (not laid out).',
-      );
+    switch (walker.tapReach(element)) {
+      case TapReachable(:final point):
+        return point;
+      case TapRefused(:final refusal, :final blocker, :final center):
+        final at = center == null ? '' : ' at ${_fmtOffset(center)}';
+        throw ActionFailure(switch (refusal) {
+          TapRefusal.notLaidOut =>
+            '$desc exists but has no on-screen geometry (not laid out).',
+          TapRefusal.nothingHit =>
+            '$desc is present$at but no widget receives pointers there right '
+                'now: a route transition is in progress and Flutter ignores '
+                'pointer events until it ends. Run wait_idle, then retry.',
+          TapRefusal.covered => '$desc is present$at but a tap there would '
+              'reach $blocker instead — it is occluded or off-screen.',
+          TapRefusal.inputBlocked => '$desc is visible$at but takes no taps '
+              'right now: $blocker swallows the pointer before it gets '
+              'there.',
+        });
     }
-    if (walker.pointersIgnoredAt(element, center)) {
-      throw ActionFailure(
-        '$desc is present at ${_fmtOffset(center)} but no widget receives '
-        'pointers there right now: a route transition is in progress and '
-        'Flutter ignores pointer events until it ends. Run wait_idle, then '
-        'retry.',
-      );
-    }
-    final blocker = walker.topmostHitTypeAt(element, center);
-    throw ActionFailure(
-      '$desc is present at ${_fmtOffset(center)} but a tap there would '
-      'reach ${blocker ?? 'nothing'} instead — it is occluded or '
-      'off-screen.',
-    );
   }
 
   /// Best-effort scroll of [target] into view, the way a user could. No-op
@@ -705,7 +724,8 @@ class GestureDispatcher {
   ///
   /// Two rules keep this from moving the screen under the test:
   ///
-  ///  * A target that is already reachable is left exactly where it is.
+  ///  * A target that is already reachable is left exactly where it is, and
+  ///    so is one that is visible but blocked ([TapRefusal.inputBlocked]).
   ///  * Only ancestors the **user** could scroll are scrolled. An ancestor
   ///    whose physics refuse user offsets (`NeverScrollableScrollPhysics`) is
   ///    app-controlled: debug overlays such as `requests_inspector` wrap the
@@ -715,7 +735,17 @@ class GestureDispatcher {
   Future<void> _ensureVisible(Element target) async {
     final renderObject = target.renderObject;
     if (renderObject is! RenderBox || !renderObject.hasSize) return;
-    if (walker.reachableTapPoint(target) != null) return;
+    switch (walker.tapReach(target)) {
+      case TapReachable():
+        return;
+      // Visible but blocked — typically a list that is still scrolling.
+      // Scrolling it now would jump it and move the screen under the test;
+      // the gate refuses, and the step re-tries once input is accepted.
+      case TapRefused(refusal: TapRefusal.inputBlocked):
+        return;
+      case TapRefused():
+        break;
+    }
 
     // Same ancestor walk as Scrollable.ensureVisible: the first scrollable
     // reveals the target, each outer one reveals the scrollable inside it.
@@ -747,9 +777,17 @@ class GestureDispatcher {
     if (scrolled) await _pumpFrames(count: 3);
   }
 
-  String _describeLocator({String? key, String? text, String? semantics}) {
+  /// How a locator reads in a failure message. A text locator names its
+  /// comparison ([TextMatch.describe]) so a fuzzy miss never reads as an
+  /// exact one.
+  String _describeLocator({
+    String? key,
+    String? text,
+    String? semantics,
+    TextMatch match = TextMatch.exact,
+  }) {
     if (key != null) return 'key "$key"';
-    if (text != null) return 'text "$text"';
+    if (text != null) return match.describe(text);
     if (semantics != null) return 'semantics "$semantics"';
     return 'locator';
   }

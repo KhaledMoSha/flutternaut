@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutternaut/src/bridge/router.dart';
@@ -212,6 +213,29 @@ void main() {
       expect(body['success'], isFalse);
       expect(body['error'], 'internal bridge error: Bad state: walker broke');
       expect(logged.single, contains('GET /screen'));
+    });
+
+    test(
+        'a FlutterError is described by its summary, description and hint '
+        '(what survives in a release build)', () async {
+      final router = BridgeRouter(log: logged.add)
+        ..get(
+          '/screen',
+          (_) => throw FlutterError.fromParts([
+            ErrorSummary('RenderBox was not laid out.'),
+            ErrorDescription('The box had no size yet.'),
+            ErrorHint('Run wait_idle first.'),
+          ]),
+        );
+
+      final (status, body) = await call(router, 'GET', '/screen');
+
+      expect(status, 500);
+      expect(
+        body['error'],
+        'internal bridge error: RenderBox was not laid out. '
+        'The box had no size yet. Run wait_idle first.',
+      );
     });
 
     test('a JSON body that is not an object is answered with a 500',

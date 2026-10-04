@@ -26,6 +26,7 @@ class WaitHandler {
   }
 
   Future<Map<String, dynamic>> _waitFor(BridgeRequest req) async {
+    _rejectUnknownMatch(req);
     final result = await _poll(
       () => resolveLocator(req, _walker) != null,
       timeoutMs: req.integer('timeout_ms', defaultValue: 10000),
@@ -37,6 +38,7 @@ class WaitHandler {
   /// [TreeWalker.checkTextVisible]); on timeout the result's `detail` says
   /// why it was not, as of the last check.
   Future<Map<String, dynamic>> _waitUntilVisible(BridgeRequest req) async {
+    _rejectUnknownMatch(req);
     final result = await _pollExplained(
       () {
         final v = resolveVisibility(req, _walker);
@@ -52,6 +54,7 @@ class WaitHandler {
   /// as gone, because a person no longer sees it. (Tree existence is
   /// `assert_not_exists`.)
   Future<Map<String, dynamic>> _waitUntilGone(BridgeRequest req) async {
+    _rejectUnknownMatch(req);
     final result = await _pollExplained(
       () {
         final v = resolveVisibility(req, _walker);
@@ -67,6 +70,7 @@ class WaitHandler {
 
   Future<Map<String, dynamic>> _waitForText(BridgeRequest req) async {
     req.require('expected');
+    _rejectUnknownMatch(req);
     final expected = req.string('expected')!;
 
     final result = await _poll(
@@ -88,6 +92,12 @@ class WaitHandler {
     );
     return result.toJson();
   }
+
+  /// Throws the 400 for an unknown `match` before polling starts (see
+  /// [textMatchOf]). The locator is otherwise only parsed inside the poll's
+  /// check, which never runs while the app is in the background — the bad
+  /// request would then come back as a timeout instead of the error it is.
+  void _rejectUnknownMatch(BridgeRequest req) => textMatchOf(req);
 
   /// Like [_poll], for a check that also explains a miss: the last
   /// explanation is returned as the failed result's `detail`.

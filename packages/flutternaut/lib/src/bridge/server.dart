@@ -13,8 +13,13 @@ import 'router.dart';
 /// HTTP server that runs inside a Flutter app and exposes the widget tree
 /// and gesture dispatch to external test engines.
 ///
-/// Binds to [InternetAddress.anyIPv4] so it's reachable from the host
-/// machine (important for emulators/simulators and real device port forwarding).
+/// Binds to [InternetAddress.loopbackIPv4] by default: the engine reaches it
+/// through `adb forward` (Android emulators and devices), the Mac's own
+/// loopback (iOS simulators share it) or usbmux/`iproxy` (iPhones) — all of
+/// which arrive on the device's loopback. Nothing on the device's network
+/// can reach it, which matters because the bridge serves unauthenticated
+/// control of the app in any build mode. Pass `address:
+/// InternetAddress.anyIPv4` to drive a device over Wi-Fi instead.
 ///
 /// The server delegates all request handling to the [BridgeRouter], which
 /// dispatches to focused handler classes. The server itself only manages
@@ -34,7 +39,7 @@ class BridgeServer {
   ///
   /// [runner] and [log] are optional — defaults are provided.
   /// [environment] is where `/health` reads the simulator UDID from;
-  /// [address] is the interface to bind (all IPv4 interfaces by default).
+  /// [address] is the interface to bind (IPv4 loopback by default).
   BridgeServer({
     TreeWalker? walker,
     MainThreadRunner? runner,
@@ -42,7 +47,7 @@ class BridgeServer {
     EnvironmentReader environment = readProcessEnvironment,
     InternetAddress? address,
   })  : _log = log ?? debugPrint,
-        _address = address ?? InternetAddress.anyIPv4 {
+        _address = address ?? InternetAddress.loopbackIPv4 {
     _router = _buildBridgeRouter(
       walker: walker ?? TreeWalker(),
       runner: runner ?? MainThreadRunner(),
@@ -57,6 +62,9 @@ class BridgeServer {
 
   /// The port the server is bound to; null while it is not running.
   int? get port => _server?.port;
+
+  /// The interface the server listens on; null while it is not running.
+  InternetAddress? get address => _server?.address;
 
   /// Routes one request. Exposed so tests can serve the router on a socket
   /// of their own.
@@ -88,10 +96,26 @@ class BridgeServer {
     server.listen(_router.handle);
   }
 
+  @visibleForTesting
+  static String bindFailure(BridgePort port, SocketException e) =>
+      _bindFailure(port, e);
+
   static String _bindFailure(BridgePort port, SocketException e) {
     final reason = e.osError?.message ?? e.message;
     final base = 'FlutternautBridge could not bind port ${port.port} '
         '(${port.origin}): $reason.';
+    // EACCES / EPERM: the process may not open sockets at all. On Android
+    // that is a missing INTERNET permission — Flutter adds it only to the
+    // debug and profile manifests, so a release build needs it declared in
+    // the main one.
+    final code = e.osError?.errorCode;
+    if (code == _eacces || code == _eperm) {
+      return '$base The app is not allowed to open a network socket. On '
+          'Android, a release build needs '
+          '<uses-permission android:name="android.permission.INTERNET"/> in '
+          'android/app/src/main/AndroidManifest.xml (Flutter adds it only to '
+          'the debug and profile manifests).';
+    }
     return switch (port.source) {
       BridgePortSource.defaultPort =>
         '$base Another app is probably already serving the bridge on '
@@ -108,6 +132,10 @@ class BridgeServer {
             'is listening on, then relaunch the app.',
     };
   }
+
+  /// errno values for "permission denied" (Linux/Android, macOS/iOS).
+  static const int _eacces = 13;
+  static const int _eperm = 1;
 
   /// Stops the server and releases the port.
   Future<void> stop() async {

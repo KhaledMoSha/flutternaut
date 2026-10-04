@@ -1,10 +1,46 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../models/element_info.dart';
 import '../models/element_rect.dart';
 import '../models/visibility_result.dart';
+
+/// How a `text` locator is compared with a widget's own visible text —
+/// the `match` field of a bridge request (`"exact"`, `"contains"`,
+/// `"starts_with"`).
+///
+/// Every mode compares against the same per-widget text (a [Text] or
+/// `Text.rich`, a [RichText], or an [EditableText]'s value — never a
+/// container's merged descendants), so the three modes only differ in the
+/// comparison itself and resolve through the same nth / ambiguity /
+/// visibility / hit-test pipeline.
+enum TextMatch {
+  /// The widget's text equals the locator, **case-sensitively** — the
+  /// default, and the only mode a catalog ref records.
+  exact,
+
+  /// The widget's text contains the locator as a substring,
+  /// case-insensitively — for labels a test only knows part of
+  /// ("Start 7-Day Free Trial").
+  contains,
+
+  /// The widget's text begins with the locator, case-insensitively — for
+  /// labels with a variable tail ("Bag · 3"), without also matching every
+  /// label that merely mentions the locator somewhere inside.
+  startsWith;
+
+  /// How a locator [text] compared in this mode reads in a failure or
+  /// visibility reason: `text "x"`, `text containing "x"`,
+  /// `text starting with "x"`. One phrasing for every route, so a reason
+  /// always says which comparison failed.
+  String describe(String text) => switch (this) {
+        TextMatch.exact => 'text "$text"',
+        TextMatch.contains => 'text containing "$text"',
+        TextMatch.startsWith => 'text starting with "$text"',
+      };
+}
 
 /// Walks the Flutter element tree to find widgets by [ValueKey] or text,
 /// read their properties, check visibility, and dump the tree structure.
@@ -211,18 +247,60 @@ class TreeWalker {
         .trim();
   }
 
-  /// Whether [element]'s own text equals the locator [text] (both sides
-  /// normalized — see [normalizeText]).
-  bool _textEquals(Element element, String text) {
+  /// The one text predicate behind every text finder: whether an
+  /// element's own text ([_widgetOwnText]) matches the locator [text] in
+  /// [match] mode.
+  ///
+  /// The locator is normalized once, here, rather than per element.
+  ///  * [TextMatch.exact] — `own == normalizeText(text)`, case-sensitive.
+  ///    The own text is compared as [_widgetOwnText] returns it, so a
+  ///    field's value still has to equal the locator verbatim.
+  ///  * [TextMatch.contains] / [TextMatch.startsWith] — both sides
+  ///    normalized and lower-cased. Normalizing the field value too means
+  ///    a value with surrounding spaces still starts with its first word;
+  ///    normalizing the locator means `" Log in "` and `"Log in"` are the
+  ///    same needle, as they already are for exact.
+  bool Function(Element) _textMatcher(String text, TextMatch match) {
+    final needle = normalizeText(text);
+    // An empty needle is a prefix and a substring of every text: a contains
+    // or starts_with check on it would match any widget, and an assertion
+    // built on it would pass whatever the screen shows.
+    if (needle.isEmpty && match != TextMatch.exact) {
+      throw ArgumentError(
+        '${match.describe(text)} needs at least one visible character to '
+        'match; got ${text.isEmpty ? 'an empty text' : 'only whitespace'}',
+      );
+    }
+    switch (match) {
+      case TextMatch.exact:
+        return (element) => _widgetOwnText(element.widget) == needle;
+      case TextMatch.contains:
+        final lower = needle.toLowerCase();
+        return (element) => _foldedOwnText(element)?.contains(lower) ?? false;
+      case TextMatch.startsWith:
+        final lower = needle.toLowerCase();
+        return (element) => _foldedOwnText(element)?.startsWith(lower) ?? false;
+    }
+  }
+
+  /// [element]'s own text normalized and lower-cased — the haystack of the
+  /// case-insensitive modes (see [_textMatcher]); null when the widget
+  /// carries no text of its own.
+  String? _foldedOwnText(Element element) {
     final own = _widgetOwnText(element.widget);
-    return own != null && own == normalizeText(text);
+    return own == null ? null : normalizeText(own).toLowerCase();
   }
 
   /// Finds the first text-bearing widget ([Text], `Text.rich`,
   /// [RichText], [EditableText]) whose visible text matches [text]
   /// exactly.
-  ElementInfo? findByText(String text) {
-    return _findWhere((element) => _textEquals(element, text));
+  ElementInfo? findByText(String text) =>
+      findByTextMatch(text, TextMatch.exact);
+
+  /// Finds the first text-bearing widget whose own visible text matches
+  /// [text] in [match] mode (see [TextMatch]).
+  ElementInfo? findByTextMatch(String text, TextMatch match) {
+    return _findWhere(_textMatcher(text, match));
   }
 
   /// Resolves the visible label [text] to the [TextEditingController]
@@ -289,7 +367,7 @@ class TreeWalker {
   /// Resolves the visible label [text] to the [EditableText] element of
   /// its associated field. See [findControllerByText] for the order.
   Element? _resolveEditableElementByText(String text) {
-    final el = _findElementWhere((e) => _textEquals(e, text));
+    final el = _findElementWhere(_textMatcher(text, TextMatch.exact));
     if (el == null) return null;
 
     final enclosing = _enclosingEditableElement(el);
@@ -311,13 +389,8 @@ class TreeWalker {
   /// Finds the first text-bearing widget whose visible text contains
   /// [substring], **case-insensitively** (contains is the fuzzy,
   /// opt-in path; exact matching via [findByText] stays case-sensitive).
-  ElementInfo? findByTextContains(String substring) {
-    final needle = substring.toLowerCase();
-    return _findWhere((element) {
-      final t = _widgetOwnText(element.widget);
-      return t != null && t.toLowerCase().contains(needle);
-    });
-  }
+  ElementInfo? findByTextContains(String substring) =>
+      findByTextMatch(substring, TextMatch.contains);
 
   /// Finds the first [Element] whose [ValueKey] value matches [keyValue].
   Element? findElementByKey(String keyValue) {
@@ -327,7 +400,7 @@ class TreeWalker {
   /// Finds the first [Element] whose own visible text equals [text]
   /// exactly (case-sensitive — see [findByText]).
   Element? findElementByText(String text) {
-    return _findElementWhere((e) => _textEquals(e, text));
+    return _findElementWhere(_textMatcher(text, TextMatch.exact));
   }
 
   /// Every [Element] whose [ValueKey] value matches [keyValue]. Used to
@@ -341,18 +414,14 @@ class TreeWalker {
 
   /// Every text-bearing [Element] whose own visible text equals [text]
   /// exactly (case-sensitive).
-  List<Element> findAllElementsByText(String text) {
-    return _findAllElementsWhere((e) => _textEquals(e, text));
-  }
+  List<Element> findAllElementsByText(String text) =>
+      findAllElementsByTextMatch(text, TextMatch.exact);
 
-  /// Every text-bearing [Element] whose own visible text contains
-  /// [substring], case-insensitively (mirrors [findByTextContains]).
-  List<Element> findAllElementsByTextContains(String substring) {
-    final needle = substring.toLowerCase();
-    return _findAllElementsWhere((e) {
-      final t = _widgetOwnText(e.widget);
-      return t != null && t.toLowerCase().contains(needle);
-    });
+  /// Every text-bearing [Element] whose own visible text matches [text] in
+  /// [match] mode (see [TextMatch]) — every match, for ambiguity detection
+  /// and visibility checks.
+  List<Element> findAllElementsByTextMatch(String text, TextMatch match) {
+    return _findAllElementsWhere(_textMatcher(text, match));
   }
 
   /// Every text-bearing [Element] whose own visible text equals [text]
@@ -557,10 +626,21 @@ class TreeWalker {
   /// never masks a visible one. With [nth], exactly the nth visible match
   /// (reading order, stacked copies of one control counted once) must
   /// exist — the same index the dump reports as `text_nth`.
-  VisibilityResult checkTextVisible(String text, {int? nth}) {
+  VisibilityResult checkTextVisible(String text, {int? nth}) =>
+      checkTextMatchVisible(text, TextMatch.exact, nth: nth);
+
+  /// Visibility of the widget(s) whose own visible text matches [text] in
+  /// [match] mode (see [TextMatch] and [checkTextVisible]). The reason names
+  /// the comparison — `text "x"`, `text containing "x"` or
+  /// `text starting with "x"` (see [TextMatch.describe]).
+  VisibilityResult checkTextMatchVisible(
+    String text,
+    TextMatch match, {
+    int? nth,
+  }) {
     return _checkVisibility(
-      findAllElementsByText(text),
-      'text "$text"',
+      findAllElementsByTextMatch(text, match),
+      match.describe(text),
       nth: nth,
     );
   }
@@ -579,13 +659,8 @@ class TreeWalker {
   /// (case-insensitive) — the `match: "contains"` form, for labels such as
   /// "Start 7-Day Free Trial" that a test only knows part of (see
   /// [checkTextVisible]).
-  VisibilityResult checkTextContainsVisible(String substring, {int? nth}) {
-    return _checkVisibility(
-      findAllElementsByTextContains(substring),
-      'text containing "$substring"',
-      nth: nth,
-    );
-  }
+  VisibilityResult checkTextContainsVisible(String substring, {int? nth}) =>
+      checkTextMatchVisible(substring, TextMatch.contains, nth: nth);
 
   /// Visibility of the widget(s) with accessibility label [label] (see
   /// [findAllElementsBySemantics] and [checkTextVisible]).
@@ -863,40 +938,188 @@ class TreeWalker {
     return false;
   }
 
-  /// The point to tap to reach [element], or null if [element] cannot be
-  /// reached by a tap (off-screen, or nothing hittable at its location).
-  ///
-  /// Tappability depends on whether the target is interactive:
-  /// - **Interactive** targets (buttons, fields, gesture detectors) must be
-  ///   reached strictly — the hit at the element's center must land in the
-  ///   element's own render subtree ([isHittableAt]). This is what catches
-  ///   a genuinely occluded or off-screen *button*.
-  /// - **Non-interactive** targets (a plain `Text`/`Icon`/`Image` used only
-  ///   as a locator) are lenient: it is enough that *something* is hittable
-  ///   at that point. Targeting by visible text means "tap whatever owns
-  ///   this pixel" — e.g. tapping a field's hint text focuses the field
-  ///   ([RenderEditable]), which is the intended interaction, not a miss.
-  ///
-  /// Either way, a point where nothing is hittable (scrolled off-screen,
-  /// clipped away) returns null so the caller can fail loudly.
+  /// The point to tap to reach [element], or null if a tap cannot reach it
+  /// right now — see [tapReach], which also says why.
+  Offset? reachableTapPoint(Element element) => switch (tapReach(element)) {
+        TapReachable(:final point) => point,
+        TapRefused() => null,
+      };
+
+  /// Where a tap reaches [element] right now, or why it cannot.
   ///
   /// The centre is tried first; when something covers it (a badge, a
   /// floating button over one end of a row), the inset sample points of
   /// [_samplePoints] are tried — a person would tap the part of the target
-  /// they can reach.
-  Offset? reachableTapPoint(Element element) {
+  /// they can reach. Each point is hit-tested once.
+  ///
+  /// Tappability depends on whether the target is interactive:
+  /// - **Interactive** targets (buttons, fields, gesture detectors) must be
+  ///   reached strictly — the hit must land in the element's own render
+  ///   subtree ([isHittableAt]). This is what catches a genuinely occluded
+  ///   or off-screen *button*.
+  /// - **Non-interactive** targets (a plain `Text`/`Icon`/`Image` used only
+  ///   as a locator) are reached when the strict test passes, or when the
+  ///   pixel is owned by what a person tapping that label would trigger
+  ///   ([_judgeLabelPoint]): a transparent input layer stretched over it, an
+  ///   empty field under its hint text, an ancestor handler. They are NOT
+  ///   reached when something painted covers them (a splash, a scrim) or
+  ///   when the pointer is swallowed before it gets there (an
+  ///   `AbsorbPointer`, a list that is still scrolling) — the tap would do
+  ///   nothing, so it must be refused, not reported as a success.
+  TapReach tapReach(Element element) {
+    final targetRo = element.renderObject;
     final center = centerOfElement(element);
-    if (center == null) return null;
-
-    if (isHittableAt(element, center)) return center;
-    for (final point in _samplePoints(element).skip(1)) {
-      if (isHittableAt(element, point)) return point;
+    if (targetRo == null || center == null) {
+      return const TapRefused(
+        TapRefusal.notLaidOut,
+        blocker: 'nothing (the target has no on-screen geometry)',
+      );
+    }
+    final root = _rootRenderObject(targetRo);
+    if (root is! RenderView) {
+      return TapRefused(
+        TapRefusal.notLaidOut,
+        center: center,
+        blocker: 'nothing (the target is not attached to a view)',
+      );
     }
 
-    if (!_isInteractiveWidget(element.widget) && _hasHitAt(element, center)) {
-      return center;
+    final points = [center, ..._samplePoints(element).skip(1)];
+    final hits = [for (final point in points) _hitTest(root, point)];
+    for (var i = 0; i < points.length; i++) {
+      if (_pathReaches(hits[i], targetRo)) return TapReachable(points[i]);
+    }
+
+    final isLabel = !_isInteractiveWidget(element.widget);
+    final verdicts = [
+      for (var i = 0; i < points.length; i++)
+        _judgeLabelPoint(targetRo, root, points[i], hits[i]),
+    ];
+    if (isLabel) {
+      for (var i = 0; i < points.length; i++) {
+        if (verdicts[i].refusal == null) return TapReachable(points[i]);
+      }
+    }
+
+    // Refused: explain with the centre's verdict. An interactive target
+    // whose centre a label tap would accept is still not reached itself —
+    // the layer or handler that owns the pixel takes the tap instead.
+    final verdict = verdicts.first;
+    final refusal = verdict.refusal ??
+        (verdict.ancestorTook ? TapRefusal.inputBlocked : TapRefusal.covered);
+    return TapRefused(refusal, center: center, blocker: verdict.blocker());
+  }
+
+  /// Hit-tests [root] at the global logical [point].
+  HitTestResult _hitTest(RenderView root, Offset point) {
+    final result = HitTestResult();
+    root.hitTest(result, position: point);
+    return result;
+  }
+
+  /// Whether the hit [result] lands in [target]'s render subtree — [target]
+  /// itself or a descendant receives the pointer (see [isHittableAt]).
+  bool _pathReaches(HitTestResult result, RenderObject target) {
+    for (final entry in result.path) {
+      final hit = entry.target;
+      if (hit is RenderObject && _isRenderAncestorOrSelf(target, hit)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// The frontmost render object in a hit [result]. The path can start with
+  /// non-render targets — a TextSpan under the pointer is a hit-test target
+  /// of its own — which say nothing about what is on top there.
+  RenderObject? _frontmost(HitTestResult result) {
+    for (final entry in result.path) {
+      final target = entry.target;
+      if (target is RenderObject) return target;
     }
     return null;
+  }
+
+  /// Whether a tap on a non-interactive label [target] (a locator, not the
+  /// control itself) may be dispatched at [point], whose hit-test [hit] does
+  /// not reach the label's own subtree. `refusal` is null when it
+  /// may; `blocker` names what takes the pointer there (computed on demand —
+  /// naming a widget looks up its element, and only the verdict a refusal
+  /// reports needs it); `ancestorTook` is true when the frontmost hit is an
+  /// ancestor of [target] (the pointer stopped before reaching it).
+  ///
+  ///  1. Only the [RenderView] is hit → [TapRefusal.nothingHit] (a route
+  ///     transition, every route scope ignoring pointers).
+  ///  2. The frontmost hit is in another branch, painted over the label →
+  ///     [TapRefusal.covered]; when it paints nothing (a
+  ///     `Positioned.fill(InkWell)` over a card, an empty field under its
+  ///     hint) or is faded out, the tap is what a person's would be: allowed.
+  ///  3. The frontmost hit is an ancestor of the label → find what blocks
+  ///     the label ([_silentClaimer], else [_ignoringBetween]): none means
+  ///     the ancestor itself takes the tap
+  ///     (an opaque handler over a child that ignores pointers): allowed. A
+  ///     silent claimer painted in front (a splash in an `AbsorbPointer`) →
+  ///     [TapRefusal.covered]. Any other blocker → allowed only when a tap
+  ///     handler wraps it ([_handlerWraps], the
+  ///     `InkWell(child: AbsorbPointer(field))` idiom), else
+  ///     [TapRefusal.inputBlocked].
+  ({TapRefusal? refusal, String Function() blocker, bool ancestorTook})
+      _judgeLabelPoint(
+    RenderObject target,
+    RenderView root,
+    Offset point,
+    HitTestResult hit,
+  ) {
+    final top = _frontmost(hit);
+    if (top == null || identical(top, root)) {
+      return (
+        refusal: TapRefusal.nothingHit,
+        blocker: () => 'nothing',
+        ancestorTook: false,
+      );
+    }
+
+    if (!_isRenderAncestorOrSelf(top, target)) {
+      final clear = _renderOpacity(top) < _visibleOpacityThreshold ||
+          _isTransparentOverlay(top, target);
+      return (
+        refusal: clear ? null : TapRefusal.covered,
+        blocker: () => _describeHit(top),
+        ancestorTook: false,
+      );
+    }
+
+    final claimer = _silentClaimer(top, point, stopAt: target);
+    final blocker = claimer ?? _ignoringBetween(top, target);
+    if (blocker == null) {
+      return (
+        refusal: null,
+        blocker: () => _describeHit(top),
+        ancestorTook: true,
+      );
+    }
+    if (claimer != null &&
+        !_isRenderAncestorOrSelf(claimer, target) &&
+        _paintsOver(claimer, point)) {
+      return (
+        refusal: TapRefusal.covered,
+        blocker: () => _describeBlocker(claimer),
+        ancestorTook: true,
+      );
+    }
+    final handler = _handlerWraps(top, blocker);
+    if (handler != null) {
+      return (
+        refusal: null,
+        blocker: () => _describeHit(handler),
+        ancestorTook: true,
+      );
+    }
+    return (
+      refusal: TapRefusal.inputBlocked,
+      blocker: () => _describeBlocker(blocker),
+      ancestorTook: true,
+    );
   }
 
   /// The tap-reachable matches among [matches], in reading order, exactly
@@ -990,86 +1213,288 @@ class TreeWalker {
     return widget.runtimeType.toString().endsWith('Button');
   }
 
-  /// Whether any widget is hit-testable at [point] in [element]'s
-  /// [RenderView] — i.e. a tap there would land on *something* rather than
-  /// fall through to nothing (off-screen / clipped away, or every route
-  /// ignoring pointers mid-transition).
+  /// The child of [top] that took the pointer at the global [point] without
+  /// recording itself on the hit path, or null when no child claims it.
   ///
-  /// The [RenderView] itself always joins the hit path and is not "something":
-  /// a pointer that reaches only the view is a pointer nobody handles.
-  bool _hasHitAt(Element element, Offset point) {
-    final ro = element.renderObject;
-    if (ro == null) return false;
-    final root = _rootRenderObject(ro);
-    if (root is! RenderView) return false;
-
-    final result = HitTestResult();
-    root.hitTest(result, position: point);
-    for (final entry in result.path) {
-      final target = entry.target;
-      if (target is RenderObject && !identical(target, root)) return true;
+  /// A render object normally joins the hit path when it or a child is hit,
+  /// so when the frontmost recorded hit [top] has a child that claims the
+  /// point, that child swallowed the pointer silently: an `AbsorbPointer`
+  /// (`RenderAbsorbPointer.hitTest` returns true without adding itself) —
+  /// a splash or loading layer, or the Navigator's absorber right after a
+  /// navigation. When no child claims it, [top] took the hit itself.
+  ///
+  /// Children are probed in hit-test order (last painted first), stopping
+  /// after the child that leads to [stopAt] when given — what is painted
+  /// below the target's branch was never asked.
+  RenderBox? _silentClaimer(
+    RenderObject top,
+    Offset point, {
+    RenderObject? stopAt,
+  }) {
+    final children = <RenderObject>[];
+    top.visitChildren(children.add);
+    final onChain = stopAt == null ? null : _childTowards(top, stopAt);
+    for (final child in children.reversed) {
+      if (child is RenderBox && child.attached && child.hasSize) {
+        final claims = child.hitTest(
+          BoxHitTestResult(),
+          position: child.globalToLocal(point),
+        );
+        if (claims) return child;
+      }
+      if (identical(child, onChain)) break;
     }
-    return false;
+    return null;
   }
 
-  /// Whether a pointer at [point] would reach only the [RenderView] — no
-  /// widget at all. During a route transition every route's scope ignores
-  /// pointers (`IgnorePointer` in `_ModalScope`), so a tap dispatched then is
-  /// silently dropped by the framework; this is how the bridge tells that
-  /// case from a genuinely occluded target.
-  bool pointersIgnoredAt(Element reference, Offset point) {
-    final ro = reference.renderObject;
-    if (ro == null) return false;
-    final root = _rootRenderObject(ro);
-    if (root is! RenderView) return false;
-    final result = HitTestResult();
-    root.hitTest(result, position: point);
-    for (final entry in result.path) {
-      final target = entry.target;
-      if (target is RenderObject && !identical(target, root)) return false;
+  /// The direct child of [ancestor] on the render path down to [node], or
+  /// null when [ancestor] is not a strict ancestor of [node].
+  RenderObject? _childTowards(RenderObject ancestor, RenderObject node) {
+    RenderObject? current = node;
+    while (current != null) {
+      final parent = current.parent;
+      if (identical(parent, ancestor)) return current;
+      current = parent is RenderObject ? parent : null;
     }
-    return true;
+    return null;
   }
+
+  /// The outermost `IgnorePointer` that is ignoring between [top]
+  /// (exclusive) and [target] — what keeps the pointer from a target whose
+  /// ancestor [top] took the hit itself (a Scrollable ignores pointers on its
+  /// content while a scroll animates or flings). Null when there is none.
+  RenderObject? _ignoringBetween(RenderObject top, RenderObject target) {
+    RenderObject? found;
+    var current = target.parent;
+    while (current is RenderObject && !identical(current, top)) {
+      if ((current is RenderIgnorePointer && current.ignoring) ||
+          (current is RenderSliverIgnorePointer && current.ignoring)) {
+        found = current;
+      }
+      current = current.parent;
+    }
+    return found;
+  }
+
+  /// The tap handler that receives a pointer [blocker] keeps from the
+  /// target, when that handler wraps [blocker] for the purpose — the
+  /// `InkWell(child: AbsorbPointer(field))` idiom of a field that opens a
+  /// picker. Null otherwise.
+  ///
+  /// The handler is the first pointer listener at or above [top] (every
+  /// ancestor of the frontmost hit receives the pointer). It qualifies when
+  /// it is a tap handler ([_isTapHandler]) and nothing painted sits between
+  /// it and [blocker]: a handler around a whole page (a keyboard-dismissing
+  /// `GestureDetector` over a loading layer) or the Navigator's raw
+  /// listener does not make the blocked target tappable.
+  RenderObject? _handlerWraps(RenderObject top, RenderObject blocker) {
+    RenderObject? listener = top;
+    while (listener != null && listener is! RenderPointerListener) {
+      final parent = listener.parent;
+      listener = parent is RenderObject ? parent : null;
+    }
+    if (listener == null || !_isTapHandler(listener)) return null;
+
+    var current = blocker.parent;
+    while (current is RenderObject) {
+      if (identical(current, listener)) return listener;
+      if (_paintsContent(current)) return null;
+      current = current.parent;
+    }
+    return null;
+  }
+
+  /// Recognizers that make a gesture detector a tap handler.
+  static const Set<Type> _tapRecognizers = {
+    TapGestureRecognizer,
+    DoubleTapGestureRecognizer,
+    LongPressGestureRecognizer,
+    TapAndPanGestureRecognizer,
+    TapAndHorizontalDragGestureRecognizer,
+  };
+
+  /// Whether [ro] is the pointer listener of a gesture detector that
+  /// recognizes taps: a `RawGestureDetector` (behind every `GestureDetector`
+  /// and `InkWell`) builds `_GestureSemantics > Listener`, and registers a
+  /// tap recognizer only while it has a tap callback — a disabled control
+  /// does not count. A raw `Listener` (the Navigator's) or a drag-only
+  /// detector (a Scrollable's) is not a tap handler.
+  bool _isTapHandler(RenderObject ro) {
+    if (ro is! RenderPointerListener) return false;
+    final element = _elementOwning(ro);
+    if (element == null) return false;
+    RawGestureDetector? detector;
+    var hops = 0;
+    element.visitAncestorElements((ancestor) {
+      final widget = ancestor.widget;
+      if (widget is RawGestureDetector) {
+        detector = widget;
+        return false;
+      }
+      return ++hops < 2;
+    });
+    final gestures = detector?.gestures;
+    return gestures != null && gestures.keys.any(_tapRecognizers.contains);
+  }
+
+  /// Names what keeps the pointer from the target: the Navigator right
+  /// after a navigation, a list that is still scrolling, or the blocking
+  /// widget with the widget it wraps, e.g. `AbsorbPointer(SplashSurface)`.
+  String _describeBlocker(RenderObject blocker) {
+    final element = _elementOwning(blocker);
+    if (element == null) return blocker.runtimeType.toString();
+    if (_hasAncestorWidget<Navigator>(element, 5)) {
+      return 'the Navigator, which takes no taps for a moment after a '
+          'navigation';
+    }
+    if (blocker is RenderIgnorePointer) {
+      final scrollable = _owningScrollable(element);
+      if (scrollable != null && scrollable.position.isScrollingNotifier.value) {
+        return 'a list that is still scrolling (a Scrollable ignores taps '
+            'on its content until the scroll settles)';
+      }
+    }
+    final name = element.widget.runtimeType.toString();
+    String? child;
+    element
+        .visitChildElements((c) => child ??= c.widget.runtimeType.toString());
+    return child == null ? name : '$name($child)';
+  }
+
+  /// The [ScrollableState] that built [element] — the nearest one above it,
+  /// when it is close enough (within [_scrollableBuildDepth] elements) to be
+  /// the Scrollable's own `IgnorePointer` rather than a widget deep in one of
+  /// its rows.
+  ScrollableState? _owningScrollable(Element element) {
+    ScrollableState? found;
+    var seen = 0;
+    element.visitAncestorElements((ancestor) {
+      if (ancestor is StatefulElement && ancestor.state is ScrollableState) {
+        found = ancestor.state as ScrollableState;
+        return false;
+      }
+      return ++seen < _scrollableBuildDepth;
+    });
+    return found;
+  }
+
+  /// How far above its content `IgnorePointer` a [ScrollableState] sits in
+  /// the element tree (its scope, gesture detector and semantics wrappers).
+  static const int _scrollableBuildDepth = 16;
+
+  /// Whether a widget of type [T] is among the first [hops] ancestors of
+  /// [element].
+  bool _hasAncestorWidget<T extends Widget>(Element element, int hops) {
+    var found = false;
+    var seen = 0;
+    element.visitAncestorElements((ancestor) {
+      if (ancestor.widget is T) {
+        found = true;
+        return false;
+      }
+      return ++seen < hops;
+    });
+    return found;
+  }
+
+  /// Whether the layer [layer] paints something a person would see at the
+  /// global [point]: not faded out, and some render object in its subtree
+  /// that covers the point paints content.
+  bool _paintsOver(RenderObject layer, Offset point) =>
+      _renderOpacity(layer) >= _visibleOpacityThreshold &&
+      _subtreePaints(layer, at: point);
 
   /// What a tap at the global logical [point] would reach right now — the
   /// gate for a coordinate tap (`tap_at`). `offScreen` when the point lies
   /// outside the view; `pointersIgnored` when nothing but the [RenderView]
-  /// is hit (mid route transition, or empty space); otherwise `target`
-  /// describes the control (or labelled widget) that owns the frontmost
-  /// hit, e.g. `ElevatedButton "Check In"`.
-  ({bool offScreen, bool pointersIgnored, String? target}) probeTapAt(
-    Offset point,
-  ) {
+  /// is hit (mid route transition, or empty space); `absorbedBy` names a
+  /// layer that swallows the pointer before anything handles it (an
+  /// `AbsorbPointer` splash, the Navigator right after a navigation) unless
+  /// a tap handler wraps it ([_handlerWraps]); otherwise `target` describes
+  /// the control (or labelled widget) that owns the frontmost hit, e.g.
+  /// `ElevatedButton "Check In"`.
+  ({
+    bool offScreen,
+    bool pointersIgnored,
+    String? absorbedBy,
+    String? target,
+  }) probeTapAt(Offset point) {
     final screen = _screenSize;
     final root = WidgetsBinding.instance.rootElement?.renderObject;
-    if (screen == null || root is! RenderView) {
-      return (offScreen: true, pointersIgnored: false, target: null);
-    }
-    if (!(Offset.zero & screen).contains(point)) {
-      return (offScreen: true, pointersIgnored: false, target: null);
-    }
-    final result = HitTestResult();
-    root.hitTest(result, position: point);
-    for (final entry in result.path) {
-      final hit = entry.target;
-      if (hit is! RenderObject || identical(hit, root)) continue;
+    if (screen == null ||
+        root is! RenderView ||
+        !(Offset.zero & screen).contains(point)) {
       return (
-        offScreen: false,
+        offScreen: true,
         pointersIgnored: false,
-        target: _describeHit(hit),
+        absorbedBy: null,
+        target: null,
       );
     }
-    return (offScreen: false, pointersIgnored: true, target: null);
+    final top = _frontmost(_hitTest(root, point));
+    if (top == null || identical(top, root)) {
+      return (
+        offScreen: false,
+        pointersIgnored: true,
+        absorbedBy: null,
+        target: null,
+      );
+    }
+    final claimer = _silentClaimer(top, point);
+    final absorbed = claimer != null && _handlerWraps(top, claimer) == null;
+    return (
+      offScreen: false,
+      pointersIgnored: false,
+      absorbedBy: absorbed ? _describeBlocker(claimer) : null,
+      target: _describeHit(top),
+    );
+  }
+
+  /// The element that owns [ro] — the [RenderObjectElement] whose
+  /// `renderObject` is [ro] — or null when no mounted element does.
+  ///
+  /// This is what `RenderObject.debugCreator` gives in a debug build, but the
+  /// bridge runs in every build mode and `debugCreator` is only set inside an
+  /// assert, so it is null in profile and release. Searched from the root
+  /// element, descending only into render-owning elements whose render object
+  /// is an ancestor of [ro] (component elements are always entered): the
+  /// walk follows the path to [ro] instead of visiting the whole tree. When
+  /// that misses — an `OverlayPortal` child sits under its portal in the
+  /// element tree but under the Overlay in the render tree — every element is
+  /// searched.
+  Element? _elementOwning(RenderObject ro) {
+    final root = WidgetsBinding.instance.rootElement;
+    if (root == null) return null;
+    return _searchOwner(root, ro, guided: true) ??
+        _searchOwner(root, ro, guided: false);
+  }
+
+  Element? _searchOwner(Element root, RenderObject ro, {required bool guided}) {
+    Element? found;
+    void visit(Element element) {
+      if (found != null) return;
+      if (element is RenderObjectElement) {
+        final own = element.renderObject;
+        if (identical(own, ro)) {
+          found = element;
+          return;
+        }
+        if (guided && !_isRenderAncestorOrSelf(own, ro)) return;
+      }
+      element.visitChildren(visit);
+    }
+
+    visit(root);
+    return found;
   }
 
   /// A readable name for the widget that owns the hit render object [ro]:
   /// its nearest control ([_controlOf]) with that control's label, else the
-  /// creating widget's type. Uses the render object's debug creator (the
-  /// bridge runs in debug builds only).
+  /// creating widget's type. Found through [_elementOwning], so it reads the
+  /// same in debug, profile and release builds.
   String _describeHit(RenderObject ro) {
-    final creator = ro.debugCreator;
-    if (creator is! DebugCreator) return ro.runtimeType.toString();
-    final element = creator.element;
+    final element = _elementOwning(ro);
+    if (element == null) return ro.runtimeType.toString();
     final owner = _controlOf(element) ?? element;
     final label = extractText(owner);
     final semantics = semanticsOf(owner);
@@ -1079,24 +1504,21 @@ class TreeWalker {
     return name;
   }
 
-  /// Diagnostic name of the render object a tap at [point] would actually
-  /// reach — the topmost hit — resolved in the same [RenderView] as
-  /// [reference]. Null if nothing is hit or no view is available. Used to
-  /// explain why a target is unreachable (occluded by X).
-  String? topmostHitTypeAt(Element reference, Offset point) {
-    final ro = reference.renderObject;
-    if (ro == null) return null;
-
-    final root = _rootRenderObject(ro);
+  /// Names what covers [element] at [point] for a "covered by X" reason:
+  /// the layer that silently swallowed the pointer in front of it
+  /// ([_silentClaimer]) when there is one, else the frontmost hit's type.
+  String? _coverAt(Element element, Offset point) {
+    final target = element.renderObject;
+    if (target == null) return null;
+    final root = _rootRenderObject(target);
     if (root is! RenderView) return null;
-
-    final result = HitTestResult();
-    root.hitTest(result, position: point);
-    for (final entry in result.path) {
-      final hit = entry.target;
-      if (hit is RenderObject) return hit.runtimeType.toString();
+    final top = _frontmost(_hitTest(root, point));
+    if (top == null) return null;
+    if (_isRenderAncestorOrSelf(top, target)) {
+      final claimer = _silentClaimer(top, point, stopAt: target);
+      if (claimer != null) return _describeBlocker(claimer);
     }
-    return null;
+    return top.runtimeType.toString();
   }
 
   // ---------------------------------------------------------------------------
@@ -1407,18 +1829,16 @@ class TreeWalker {
   ElementRect? _rectOf(Element element) {
     final renderObject = element.renderObject;
     if (renderObject is! RenderBox || !renderObject.hasSize) return null;
-    try {
-      final offset = renderObject.localToGlobal(Offset.zero);
-      return ElementRect(
-        x: offset.dx,
-        y: offset.dy,
-        width: renderObject.size.width,
-        height: renderObject.size.height,
-      );
-    } on Exception {
-      // RenderObject may not be attached or laid out.
-      return null;
-    }
+    // A detached render object has no transform to the screen (and
+    // `localToGlobal` would throw an Error, not an Exception).
+    if (!renderObject.attached) return null;
+    final offset = renderObject.localToGlobal(Offset.zero);
+    return ElementRect(
+      x: offset.dx,
+      y: offset.dy,
+      width: renderObject.size.width,
+      height: renderObject.size.height,
+    );
   }
 
   /// Extracts text content from an element or its first text-bearing descendant.
@@ -1734,7 +2154,7 @@ class TreeWalker {
     }
     if (_coverage(element, screen) == _Coverage.covered) {
       final center = rect.center;
-      final blocker = topmostHitTypeAt(element, center);
+      final blocker = _coverAt(element, center);
       return hidden(
         'is covered by ${blocker ?? 'another widget'} at every point',
         onScreen: true,
@@ -1758,16 +2178,18 @@ class TreeWalker {
   /// inset 25% into its visible rect).
   ///
   /// A point is clear when the frontmost hit there is in the element's own
-  /// render lineage (itself, a descendant, or an ancestor behind it), or is
-  /// a transparent input layer ([_isTransparentOverlay] — a
-  /// `Positioned.fill(InkWell)` over a card paints nothing). Clear at every
+  /// render lineage (itself, a descendant, or an ancestor behind it — unless
+  /// a layer in front swallowed the pointer silently and paints there, see
+  /// [_pointClear]), or is a transparent input layer
+  /// ([_isTransparentOverlay] — a `Positioned.fill(InkWell)` over a card
+  /// paints nothing). Clear at every
   /// point → [_Coverage.clear]; at none → [_Coverage.covered]; otherwise
   /// [_Coverage.partial], which the dump reports as `partial: true` instead
   /// of silently dropping the element.
   ///
   /// Hit-test based, so a pointer-transparent (`IgnorePointer`) layer
-  /// painted on top is not detected; real bars and modals, which absorb
-  /// pointers, are.
+  /// painted on top is not detected; real bars and modals, and
+  /// `AbsorbPointer` layers (a splash held over the page), are.
   _Coverage _coverage(Element element, Size? screen) {
     final targetRo = element.renderObject;
     if (targetRo == null) return _Coverage.clear;
@@ -1802,23 +2224,21 @@ class TreeWalker {
   }
 
   bool _pointClear(RenderObject target, RenderView root, Offset point) {
-    final result = HitTestResult();
-    root.hitTest(result, position: point);
-    // The frontmost render object hit. The path can start with non-render
-    // targets — a TextSpan under the pointer is a hit-test target of its
-    // own — which say nothing about what is painted there.
-    RenderObject? top;
-    for (final entry in result.path) {
-      final t = entry.target;
-      if (t is RenderObject) {
-        top = t;
-        break;
-      }
-    }
+    final top = _frontmost(_hitTest(root, point));
     if (top == null) return true;
-    if (_isRenderAncestorOrSelf(target, top) ||
-        _isRenderAncestorOrSelf(top, target)) {
-      return true;
+    if (_isRenderAncestorOrSelf(target, top)) return true;
+    if (_isRenderAncestorOrSelf(top, target)) {
+      // The pointer stopped at an ancestor. Either the ancestor took it
+      // itself (nothing is over the target), or a child of it swallowed it
+      // without joining the hit path: an `AbsorbPointer` wrapping the
+      // target's branch absorbs input but hides nothing; one painted in
+      // front of it (a splash, a loading layer) covers the target when it
+      // paints there.
+      final claimer = _silentClaimer(top, point, stopAt: target);
+      if (claimer == null || _isRenderAncestorOrSelf(claimer, target)) {
+        return true;
+      }
+      return !_paintsOver(claimer, point);
     }
     // A faded-out layer on top (Opacity 0, a finished fade-out kept for
     // layout) still takes the hit but paints nothing over the target.
@@ -1833,24 +2253,7 @@ class TreeWalker {
   /// and its ancestors up to (excluding) the first one that also contains
   /// [target]; any painting render object in that branch is an occluder.
   bool _isTransparentOverlay(RenderObject top, RenderObject target) {
-    var budget = _transparentScanBudget;
-    var paints = false;
-    void scan(RenderObject ro) {
-      if (paints || budget-- <= 0) {
-        // Out of budget: assume it paints — never claim a clear view that
-        // was not proven.
-        paints = true;
-        return;
-      }
-      if (_paintsContent(ro)) {
-        paints = true;
-        return;
-      }
-      ro.visitChildren(scan);
-    }
-
-    scan(top);
-    if (paints) return false;
+    if (_subtreePaints(top)) return false;
 
     var current = top.parent;
     while (current is RenderObject) {
@@ -1861,15 +2264,49 @@ class TreeWalker {
     return false;
   }
 
-  /// Render objects [_isTransparentOverlay] inspects before giving up.
+  /// Whether any render object in [root]'s subtree paints content
+  /// ([_paintsContent]). With [at], boxes whose global bounds do not
+  /// contain that point are skipped with their subtrees — only what is
+  /// painted at the point counts. Gives up after [_transparentScanBudget]
+  /// render objects and then reports that it paints: a clear view that was
+  /// not proven is never claimed.
+  bool _subtreePaints(RenderObject root, {Offset? at}) {
+    var budget = _transparentScanBudget;
+    var paints = false;
+    void scan(RenderObject ro) {
+      if (paints) return;
+      if (budget-- <= 0) {
+        paints = true;
+        return;
+      }
+      if (at != null && ro is RenderBox && ro.hasSize) {
+        final bounds = ro.localToGlobal(Offset.zero) & ro.size;
+        if (!bounds.contains(at)) return;
+      }
+      if (_paintsContent(ro)) {
+        paints = true;
+        return;
+      }
+      ro.visitChildren(scan);
+    }
+
+    scan(root);
+    return paints;
+  }
+
+  /// Render objects [_subtreePaints] inspects before giving up.
   static const int _transparentScanBudget = 64;
 
   /// Whether [ro] paints visible content of its own (text, images,
   /// decoration, fill, platform views…) rather than only passing pointers
   /// or layout through.
   bool _paintsContent(RenderObject ro) {
+    // An empty field paints only its cursor: the hint text under it shows
+    // through, and a tap on the hint is a tap on the field.
+    if (ro is RenderEditable) {
+      return ro.text?.toPlainText().isNotEmpty ?? false;
+    }
     if (ro is RenderParagraph ||
-        ro is RenderEditable ||
         ro is RenderImage ||
         ro is RenderPhysicalModel ||
         ro is RenderPhysicalShape ||
@@ -2005,25 +2442,17 @@ class TreeWalker {
   /// (off-screen, scrolled out of a sub-viewport, or hidden behind a clip).
   Rect? _visibleRect(Element element, Size? screen) {
     final ro = element.renderObject;
-    if (ro is! RenderBox || !ro.hasSize) return null;
-    Rect rect;
-    try {
-      rect = ro.localToGlobal(Offset.zero) & ro.size;
-    } on Exception {
-      // RenderObject may not be attached or laid out.
-      return null;
-    }
+    if (ro is! RenderBox || !ro.hasSize || !ro.attached) return null;
+    var rect = ro.localToGlobal(Offset.zero) & ro.size;
     if (screen != null) rect = rect.intersect(Offset.zero & screen);
 
     var parent = ro.parent;
     while (parent is RenderObject) {
-      if (_clips(parent) && parent is RenderBox && parent.hasSize) {
-        try {
-          rect =
-              rect.intersect(parent.localToGlobal(Offset.zero) & parent.size);
-        } on Exception {
-          // An unattached ancestor can't clip — skip it.
-        }
+      if (_clips(parent) &&
+          parent is RenderBox &&
+          parent.hasSize &&
+          parent.attached) {
+        rect = rect.intersect(parent.localToGlobal(Offset.zero) & parent.size);
       }
       parent = parent.parent;
     }
@@ -2111,7 +2540,8 @@ class TreeWalker {
 
     final renderObject = element.renderObject;
     if (renderObject is RenderBox && renderObject.hasSize) {
-      try {
+      // A detached render object has no position on screen.
+      if (renderObject.attached) {
         final offset = renderObject.localToGlobal(Offset.zero);
         node['rect'] = {
           'x': offset.dx,
@@ -2119,8 +2549,6 @@ class TreeWalker {
           'w': renderObject.size.width,
           'h': renderObject.size.height,
         };
-      } on Exception {
-        // Skip position if not available.
       }
     }
 
@@ -2263,4 +2691,53 @@ class _NthIndex {
     });
     return found;
   }
+}
+
+/// Why a tap cannot reach a target right now ([TreeWalker.tapReach]).
+enum TapRefusal {
+  /// The target has no laid-out, on-screen geometry.
+  notLaidOut,
+
+  /// Nothing but the view receives pointers at the target: a route
+  /// transition is in progress (every route scope ignores pointers).
+  nothingHit,
+
+  /// Something painted over the target would take the tap.
+  covered,
+
+  /// The target is visible but takes no input right now: the pointer is
+  /// swallowed before it gets there (an `AbsorbPointer`, the Navigator right
+  /// after a navigation, a list that is still scrolling).
+  inputBlocked,
+}
+
+/// Where a tap reaches a target, or why it cannot ([TreeWalker.tapReach]).
+sealed class TapReach {
+  const TapReach();
+}
+
+/// A tap at [point] reaches the target.
+final class TapReachable extends TapReach {
+  /// The global logical point to tap.
+  final Offset point;
+
+  /// Creates a reachable verdict at [point].
+  const TapReachable(this.point);
+}
+
+/// A tap cannot reach the target: [refusal] says why, [blocker] names what
+/// takes the pointer instead, [center] is the target's centre (null when it
+/// has none).
+final class TapRefused extends TapReach {
+  /// Why the tap is refused.
+  final TapRefusal refusal;
+
+  /// What takes the pointer instead, e.g. `AbsorbPointer(SplashSurface)`.
+  final String blocker;
+
+  /// The target's centre, when it has on-screen geometry.
+  final Offset? center;
+
+  /// Creates a refused verdict.
+  const TapRefused(this.refusal, {required this.blocker, this.center});
 }

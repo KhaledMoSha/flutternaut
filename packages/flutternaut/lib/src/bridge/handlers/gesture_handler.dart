@@ -4,6 +4,7 @@ import '../engine/gesture_dispatcher.dart';
 import '../engine/main_thread_runner.dart';
 import '../models/action_result.dart';
 import '../router.dart';
+import '_locator.dart';
 
 /// Handles all gesture endpoints: tap, type, scroll, swipe, drag, fling, etc.
 class GestureHandler {
@@ -42,12 +43,18 @@ class GestureHandler {
   /// `match` (text targeting only): `"exact"` (default) requires the
   /// visible text to equal `text`; `"contains"` matches any widget
   /// whose visible text contains `text` as a substring — useful for
-  /// rich/partial labels.
+  /// rich/partial labels; `"starts_with"` matches a widget whose text
+  /// begins with `text` — for labels with a variable tail. The fuzzy
+  /// modes are case-insensitive. Any other value is a 400 (see
+  /// [textMatchOf]), checked before anything else so a bad request never
+  /// reaches the screen.
   ///
   /// `nth` (key/text/semantics targeting): when several visible widgets
   /// match, picks one in reading order (0-based); without it a duplicate
   /// label is an ambiguity failure.
   Future<Map<String, dynamic>> _tap(BridgeRequest req) async {
+    final match = textMatchOf(req);
+
     // `at: {x, y}` (logical pixels) is the explicit coordinate tap — for a
     // target no locator can address. It is still gated (see
     // [GestureDispatcher.tapAt]) and reports the widget it reached.
@@ -85,14 +92,15 @@ class GestureHandler {
     final key = req.string('key');
     final text = req.string('text');
     final semantics = req.string('semantics');
-    final match = req.string('match') ?? 'exact';
     final nth = _optionalNth(req);
 
     // `hit` names the widget the tap reached — the caller's confirmation
-    // of where a tap by locator landed (as for `at`).
+    // of where a tap by locator landed (as for `at`). A text locator wins
+    // over `semantics` (as in [GestureDispatcher.resolveActable]), so every
+    // text tap goes through the match-aware path.
     final hit = await _runner.run(() {
-      if (key == null && text != null && match == 'contains') {
-        return _gesture.tapByTextContains(text, nth: nth);
+      if (key == null && text != null) {
+        return _gesture.tapByTextMatch(text, match, nth: nth);
       }
       return _gesture.tap(
         key: key,
@@ -168,7 +176,10 @@ class GestureHandler {
     return ActionResult(action: 'scroll', success: success).toJson();
   }
 
+  /// Long-presses an element located like [_tap]'s targets: `key`, `text`
+  /// (honouring `match`, as for `/tap`), `semantics`, or `near` + `nth`.
   Future<Map<String, dynamic>> _longPress(BridgeRequest req) async {
+    final match = textMatchOf(req);
     final duration =
         Duration(milliseconds: req.integer('duration_ms', defaultValue: 600));
 
@@ -197,6 +208,7 @@ class GestureHandler {
         key: key,
         text: text,
         semantics: semantics,
+        match: match,
         nth: nth,
         duration: duration,
       ),

@@ -28,18 +28,17 @@ flutter pub add flutternaut
 **2. Start the bridge in `main()`**
 
 ```dart
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutternaut/flutternaut.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (kDebugMode) {
-    await FlutternautBridge.ensureInitialized();
-  }
+  await FlutternautBridge.ensureInitialized();
   runApp(const MyApp());
 }
 ```
+
+The bridge works in every build mode (debug, profile and release) on Android and iOS, so the call is unconditional. **Remove it (or pass `enabled: false`) in a build you publish to a store**: the bridge gives full control of the app to whoever can reach it. See [Build modes](#build-modes).
 
 **3. (Optional) Add `ValueKey`s for widgets without text**
 
@@ -78,11 +77,12 @@ The bridge is designed to pair with the Flutternaut engine (written in Go), whic
 ```dart
 await FlutternautBridge.ensureInitialized(
   port: 8500,          // default; see "Which port the bridge uses"
-  enabled: !kReleaseMode, // false disables the bridge without removing the call
+  enabled: true,       // default; false disables the bridge without removing the call
+  bindAddress: null,   // default = the device's loopback (127.0.0.1); see "Build modes"
 );
 ```
 
-Both parameters are optional. `ensureInitialized()` is idempotent — safe to call multiple times; subsequent calls are ignored if the server is already running. `FlutternautBridge.instance` returns the running bridge, `FlutternautBridge.instance.isRunning` reports its state and `FlutternautBridge.instance.port` the port it is bound to.
+All parameters are optional. `ensureInitialized()` is idempotent — safe to call multiple times; subsequent calls are ignored if the server is already running. `FlutternautBridge.instance` returns the running bridge, `FlutternautBridge.instance.isRunning` reports its state and `FlutternautBridge.instance.port` the port it is bound to and `FlutternautBridge.instance.address` the address it listens on.
 
 ### Which port the bridge uses
 
@@ -101,7 +101,22 @@ The bridge fails loudly rather than listen somewhere the engine is not looking. 
 
 `GET /health` reports where a bridge is: `port` (the port it is bound to) and, on an iOS simulator, `device_id` (that simulator's UDID).
 
-**Security:** the server binds `0.0.0.0` (all interfaces) so emulators, simulators and USB-forwarded devices can reach it, and the package has **no built-in build-mode gate**. Always wrap the call in `kDebugMode` (or pass `enabled: !kReleaseMode`) so a release build never exposes the bridge.
+**Security:** by default the server listens only on the device's loopback interface (`127.0.0.1`), so it is not reachable from the network. The engine reaches it through `adb forward` (Android), the Mac's own loopback (iOS simulators) or a USB forward (`usbmux` / `iproxy`, physical iPhones). The package has **no built-in build-mode gate**: the bridge gives full control of the app to whoever can reach it, so do not ship it in a build you publish to a store (see [Build modes](#build-modes)).
+
+## Build modes
+
+The bridge works in **debug, profile and release** builds, on Android and iOS. Use whichever build you want to test; do not publish a build that contains the bridge.
+
+- **Listening address.** The default is the device's loopback (`127.0.0.1`). To drive a device over Wi-Fi, pass `bindAddress: InternetAddress.anyIPv4` (`InternetAddress` is from `dart:io`) to listen on all interfaces. Anyone on that network can then control the app, so use it only on a network you trust.
+- **Android release builds need the `INTERNET` permission.** Flutter adds it only to the debug and profile manifests. Add it to `android/app/src/main/AndroidManifest.xml`:
+
+  ```xml
+  <uses-permission android:name="android.permission.INTERNET"/>
+  ```
+
+  Without it the bridge cannot open its socket and `ensureInitialized()` throws a `FlutternautBridgeException` that says so.
+- **iOS profile and release builds run only on a physical iPhone** (a Flutter limitation); simulators run debug builds. Physical iPhone support in the Flutternaut engine is partial for now: you start `iproxy 8500 8500` yourself (the engine does not manage it), and parallel runs do not accept physical iOS devices.
+- **`--obfuscate` is not supported yet.** The bridge relies on Flutter type names for some decisions, so a build made with `--obfuscate` is not supported.
 
 To shut down the server (e.g. in tests or on app teardown):
 
@@ -129,7 +144,7 @@ The package also exposes the generator as an executable, so `dart run flutternau
 
 ## Platform setup
 
-The Flutternaut engine (or desktop app) handles port forwarding automatically when it creates a session — you do not need to run `adb forward` or `iproxy` yourself.
+The Flutternaut engine (or desktop app) forwards the bridge port for Android devices and emulators automatically when it creates a session — you do not need to run `adb forward` yourself. For a **physical iPhone** you run `iproxy 8500 8500` yourself (the engine does not manage it).
 
 If you are calling the bridge directly from a host script (no engine in the picture), forward the bridge port once before your test run:
 
@@ -147,7 +162,7 @@ iOS simulators share the host network, so no forwarding is needed there.
 
 - Dart `>=3.5.0 <4.0.0`
 - Flutter `>=3.24.0`
-- Android or iOS. The bridge runs in any build mode; gate it yourself with `kDebugMode` so it never ships in release
+- Android or iOS. The bridge runs in any build mode (debug, profile, release); see [Build modes](#build-modes), and leave it out of builds you publish to a store
 
 ## License
 

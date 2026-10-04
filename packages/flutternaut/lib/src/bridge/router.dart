@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/foundation.dart';
 
 import 'models/action_failure.dart';
 
@@ -161,8 +161,25 @@ class BridgeRouter {
       // indistinguishable from a blocked UI thread. Answer it with what
       // actually went wrong.
       _log('[FlutternautBridge] $key: $e\n$stack');
-      _fail(request, 'internal bridge error: $e', status: 500);
+      _fail(request, 'internal bridge error: ${_describeError(e)}',
+          status: 500);
     }
+  }
+
+  /// [error] as text that reads the same in every build mode. In a release
+  /// build `FlutterError.toString()` keeps only its first summary line; its
+  /// summary, description and hint entries stay readable, so they are joined.
+  static String _describeError(Error error) {
+    if (error is! FlutterError) return '$error';
+    final parts = [
+      for (final node in error.diagnostics)
+        if ((node is ErrorSummary ||
+                node is ErrorDescription ||
+                node is ErrorHint) &&
+            node is DiagnosticsProperty)
+          node.valueToString(),
+    ];
+    return parts.isEmpty ? '$error' : parts.join(' ');
   }
 
   /// How many characters of the encoder's partial output an encoding

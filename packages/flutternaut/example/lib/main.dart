@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutternaut/flutternaut.dart';
 
@@ -6,9 +5,9 @@ import 'screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (kDebugMode) {
-    await FlutternautBridge.ensureInitialized();
-  }
+  // On in every build mode, so the example can be tested as a debug, profile
+  // or release build. Remove it from a build you publish to a store.
+  await FlutternautBridge.ensureInitialized();
   runApp(const FlutternautExampleApp());
 }
 

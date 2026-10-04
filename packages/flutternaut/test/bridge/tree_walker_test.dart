@@ -144,6 +144,132 @@ void main() {
       // exact match stays case-sensitive
       expect(walker.findByText('log in'), isNull);
     });
+
+    testWidgets('normalizes the needle like the text it is compared with',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        const Text.rich(TextSpan(children: [
+          TextSpan(text: "Don't have an account? "),
+          TextSpan(text: 'Sign up'),
+        ])),
+      ));
+
+      // The label's own text is trimmed; a padded needle used to miss it.
+      expect(walker.findByTextContains('  sign up  '), isNotNull);
+      expect(
+        walker.findByTextMatch('account? ￼ sign', TextMatch.contains),
+        isNotNull,
+      );
+    });
+  });
+
+  group('an empty needle', () {
+    testWidgets(
+        'is refused by contains and starts_with (it would match any text)',
+        (tester) async {
+      await tester.pumpWidget(_app(const Text('Hello World')));
+
+      for (final match in [TextMatch.contains, TextMatch.startsWith]) {
+        expect(
+          () => walker.findByTextMatch('   ', match),
+          throwsA(isA<ArgumentError>().having(
+            (e) => '${e.message}',
+            'message',
+            contains('needs at least one visible character'),
+          )),
+        );
+        expect(() => walker.checkTextMatchVisible('', match),
+            throwsArgumentError);
+      }
+      // Exact keeps its meaning: an empty text matches only empty texts.
+      expect(walker.findByTextMatch('', TextMatch.exact), isNull);
+    });
+  });
+
+  group('findByTextMatch starts_with', () {
+    testWidgets('matches a prefix of the label', (tester) async {
+      await tester.pumpWidget(_app(const Text('Hello World')));
+
+      final info = walker.findByTextMatch('Hello', TextMatch.startsWith);
+      expect(info, isNotNull);
+      expect(info!.text, 'Hello World');
+      expect(walker.findByTextMatch('World', TextMatch.startsWith), isNull);
+      expect(walker.findByTextMatch('xyz', TextMatch.startsWith), isNull);
+    });
+
+    testWidgets('is case-insensitive', (tester) async {
+      await tester.pumpWidget(_app(const Text('Log in')));
+
+      expect(walker.findByTextMatch('LOG', TextMatch.startsWith), isNotNull);
+      expect(walker.findByTextMatch('log i', TextMatch.startsWith), isNotNull);
+    });
+
+    testWidgets('matches a prefix, never an infix', (tester) async {
+      await tester.pumpWidget(_app(const Column(children: [
+        Text('Start Free Trial'),
+        Text('Free Trial'),
+      ])));
+
+      final prefixed =
+          walker.findAllElementsByTextMatch('Free', TextMatch.startsWith);
+      expect(prefixed, hasLength(1));
+      expect((prefixed.single.widget as Text).data, 'Free Trial');
+      // contains sees both — the difference starts_with exists for.
+      expect(
+        walker.findAllElementsByTextMatch('Free', TextMatch.contains),
+        hasLength(2),
+      );
+    });
+
+    testWidgets('matches the prefix of a rich label across its spans',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        const Text.rich(TextSpan(children: [
+          TextSpan(text: "Don't have "),
+          TextSpan(text: 'an account?'),
+        ])),
+      ));
+
+      expect(
+        walker.findByTextMatch("don't have an", TextMatch.startsWith),
+        isNotNull,
+      );
+      expect(
+        walker.findByTextMatch('an account?', TextMatch.startsWith),
+        isNull,
+      );
+    });
+
+    testWidgets('ignores leading whitespace and inline widgets on both sides',
+        (tester) async {
+      final controller = TextEditingController(text: '  hello there');
+      addTearDown(controller.dispose);
+      await tester.pumpWidget(_app(Column(children: [
+        const Text.rich(TextSpan(children: [
+          WidgetSpan(child: Icon(Icons.shopping_bag)),
+          TextSpan(text: ' Bag · 3'),
+        ])),
+        const Text('   Padded label'),
+        TextField(controller: controller),
+      ])));
+
+      expect(walker.findByTextMatch('Bag', TextMatch.startsWith), isNotNull);
+      expect(
+        walker.findByTextMatch('  bag · ', TextMatch.startsWith),
+        isNotNull,
+      );
+      expect(walker.findByTextMatch('padded', TextMatch.startsWith), isNotNull);
+      // A field's value: its leading spaces do not hide its first word.
+      expect(walker.findByTextMatch('Hello', TextMatch.startsWith), isNotNull);
+    });
+
+    testWidgets('exact stays case-sensitive', (tester) async {
+      await tester.pumpWidget(_app(const Text('Hello World')));
+
+      expect(walker.findByTextMatch('Hello World', TextMatch.exact), isNotNull);
+      expect(walker.findByTextMatch('hello world', TextMatch.exact), isNull);
+      expect(walker.findByTextMatch('Hello', TextMatch.exact), isNull);
+    });
   });
 
   group('findAllKeyed', () {
@@ -1450,6 +1576,27 @@ void main() {
       await tester.pumpWidget(_app(const Text('Start 7-Day Free Trial')));
       expect(walker.checkTextContainsVisible('free trial').visible, isTrue);
       expect(walker.checkTextVisible('Free Trial').exists, isFalse);
+    });
+
+    testWidgets('checkTextMatchVisible checks a prefix and names the mode',
+        (tester) async {
+      await tester.pumpWidget(_app(const Text('Start 7-Day Free Trial')));
+
+      expect(
+        walker.checkTextMatchVisible('start 7', TextMatch.startsWith).visible,
+        isTrue,
+      );
+      final infix = walker.checkTextMatchVisible('Free', TextMatch.startsWith);
+      expect(infix.exists, isFalse);
+      expect(infix.reason, 'no widget matches text starting with "Free"');
+      expect(
+        walker.checkTextMatchVisible('Nope', TextMatch.contains).reason,
+        'no widget matches text containing "Nope"',
+      );
+      expect(
+        walker.checkTextMatchVisible('Nope', TextMatch.exact).reason,
+        'no widget matches text "Nope"',
+      );
     });
   });
 }

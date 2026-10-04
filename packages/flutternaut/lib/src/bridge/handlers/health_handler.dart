@@ -19,7 +19,14 @@ class HealthHandler {
   /// TCP port this bridge is bound to, always) and `device_id` (the iOS
   /// simulator's UDID; absent anywhere else). A client that chose a port
   /// for one simulator can prove the answer came from that simulator's app.
-  static const String protocolVersion = '1.3.0';
+  ///
+  /// 1.4.0 — a `text` locator's `match` accepts `"starts_with"` (the widget's
+  /// own text begins with `text`, case-insensitively) beside `"exact"` and
+  /// `"contains"`, on every locator route including `/tap` and
+  /// `/long_press`; any other `match` is a 400 instead of a silent exact
+  /// match. `/long_press` honours `match` (it ignored it before), and the
+  /// `contains` needle is normalized like the text it is compared with.
+  static const String protocolVersion = '1.4.0';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;
