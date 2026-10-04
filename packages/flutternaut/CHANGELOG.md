@@ -22,6 +22,11 @@
 * `/long_press` honours `match`. Before, it ignored the field, so `match: "contains"` was silently matched exactly.
 * The `contains` locator text is normalized like the text it is compared with (inline-widget placeholders dropped, surrounding whitespace trimmed), so `" Log in "` finds "Log in".
 * Bridge protocol 1.4.0.
+* **`/assert_enabled`, `/assert_disabled` and `/is_enabled` answer for the control the matched widget belongs to.** A button's label answers with the button's state, a switch tile's title with the tile, a field's label with the field. Before, they read the matched widget itself: a `Text` has no state, so a disabled button addressed by its label was reported **enabled**, and so were a FAB, a `CupertinoButton`, a keyed `Padding` around a button and any widget the old table did not know. The routes now honour `match`, `semantics` and `nth`, skip pages hidden under a dialog and offstage tabs (a target scrolled out of view still counts), name the control checked (`control`) and fail as ambiguous when two controls match. A widget that is part of no control — a caption, a static `ListTile` row — fails both ways with `final: true`.
+* One enabled-state rule for the `/screen` dump and the state routes, following Flutter's own definitions (`ButtonStyleButton.enabled`: `onPressed` **or** `onLongPress`). A static `ListTile` (no `onTap`) no longer reads as a disabled control, and a `GestureDetector` that only handles drags is not a tap control (it is no longer a `near` candidate either).
+* `/assert_text_equals` and `/assert_text_contains` see only **visible** text — the `/assert_visible` rule. Before, they searched the whole tree, so text on a page under a dialog or in an offstage tab satisfied them.
+* Every `nth` indexes one list: the visible matches in reading order, stacked copies of one control counted once. `/tap`, `/long_press`, the visibility routes, the state routes and the dump's `text_nth`/`semantics_nth` agree. A tap then checks that the chosen match takes taps, and refuses it (naming what swallows the pointer) instead of skipping it when numbering — so a duplicate behind an `IgnorePointer` keeps its number.
+* Bridge protocol 1.5.0.
 
 ## 0.0.6 — 2026-04-10
 

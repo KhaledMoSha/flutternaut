@@ -157,7 +157,7 @@ void main() {
       )));
 
       expect(
-        walker.actableMatches(walker.findAllElementsByText('Home')),
+        walker.visibleMatches(walker.findAllElementsByText('Home')),
         hasLength(1),
       );
       await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Home'));
@@ -173,7 +173,7 @@ void main() {
       )));
 
       expect(
-        walker.actableMatches(walker.findAllElementsByText('Price')),
+        walker.visibleMatches(walker.findAllElementsByText('Price')),
         hasLength(2),
       );
     });

@@ -79,18 +79,22 @@ class AssertHandler {
 
   // --- text presence assertions --------------------------------------------
   //
-  // These are text-existence checks, not element-specific. They search the
-  // entire tree for any widget whose text matches.
+  // Screen-wide: is any widget a person can see showing this text? Text on
+  // a page hidden under a dialog, in an offstage tab or faded out does not
+  // count — the same visibility rule as `/assert_visible` (protocol 1.5.0).
 
   Future<Map<String, dynamic>> _assertTextEquals(BridgeRequest req) async {
     req.require('text');
     final text = req.string('text')!;
 
     return _runner.run(() {
-      final passed = _walker.findByText(text) != null;
+      final v = _walker.checkTextMatchVisible(text, TextMatch.exact);
       return _result(
-        passed,
-        passed ? 'Text "$text" was found' : 'No element with text "$text"',
+        v.visible,
+        v.visible
+            ? 'Text "$text" is visible'
+            : 'No visible widget has text "$text"'
+                '${v.exists && v.reason != null ? ' (${v.reason})' : ''}',
       );
     });
   }
@@ -100,12 +104,13 @@ class AssertHandler {
     final text = req.string('text')!;
 
     return _runner.run(() {
-      final passed = _walker.findByTextContains(text) != null;
+      final v = _walker.checkTextMatchVisible(text, TextMatch.contains);
       return _result(
-        passed,
-        passed
-            ? 'Text containing "$text" was found'
-            : 'No element contains "$text"',
+        v.visible,
+        v.visible
+            ? 'Text containing "$text" is visible'
+            : 'No visible widget contains "$text"'
+                '${v.exists && v.reason != null ? ' (${v.reason})' : ''}',
       );
     });
   }
@@ -124,16 +129,26 @@ class AssertHandler {
 
   // --- helpers -------------------------------------------------------------
 
-  /// Asserts the element's enabled state matches [expectEnabled].
+  /// Asserts that the control the locator names is enabled
+  /// ([expectEnabled]) or disabled — the control that owns the matched
+  /// widget, so a button's label answers with the button's state (see
+  /// [TreeWalker.resolveStateTarget]). A locator that names no control at
+  /// all fails both ways, and finally: it is neither enabled nor disabled.
   Map<String, dynamic> _stateAssert(BridgeRequest req,
       {required bool expectEnabled}) {
-    final info = resolveLocator(req, _walker);
-    if (info == null) return _result(false, 'Element not found');
-
-    final enabled = info.enabled ?? true;
-    final passed = enabled == expectEnabled;
-    final stateLabel = enabled ? 'enabled' : 'disabled';
-    return _result(passed, 'Element is $stateLabel');
+    return switch (resolveStateLocator(req, _walker)) {
+      StateFound(:final enabled, :final description) => AssertResult(
+          passed: enabled == expectEnabled,
+          message: '$description is ${enabled ? 'enabled' : 'disabled'}',
+          control: description,
+        ).toJson(),
+      StateMissing(:final reason) => _result(false, reason),
+      final StateNotAControl notAControl => AssertResult(
+          passed: false,
+          message: notAControl.reason,
+          isFinal: true,
+        ).toJson(),
+    };
   }
 
   Map<String, dynamic> _result(bool passed, String message) {

@@ -554,12 +554,14 @@ class GestureDispatcher {
   ///      [match] mode — see [TextMatch]) or [semantics].
   ///   2. Single match → scroll it into view (best-effort), settle, then
   ///      confirm it is genuinely tappable via a real hit-test.
-  ///   3. Multiple matches → only those currently on-screen AND hittable
-  ///      count, ordered in reading order. With [nth], that index wins
-  ///      (out of range → fail, naming the count). Without it, exactly
-  ///      one must remain; zero → fail (nothing visible to act on); two
-  ///      or more → fail as ambiguous, listing the candidates with the
-  ///      `nth` each one would take.
+  ///   3. Multiple matches → the visible ones count, in reading order —
+  ///      the one list every `nth` indexes ([TreeWalker.visibleMatches]).
+  ///      With [nth], that index wins (out of range → fail, naming the
+  ///      count). Without it, exactly one must remain; zero → fail
+  ///      (nothing visible to act on); two or more → fail as ambiguous,
+  ///      listing the candidates with the `nth` each one would take. The
+  ///      chosen match must then be reachable by a tap, or the action is
+  ///      refused naming what takes the pointer instead.
   Future<Offset> resolveActable({
     String? key,
     String? text,
@@ -590,46 +592,41 @@ class GestureDispatcher {
       return _confirmHittable(element, desc);
     }
 
-    // More than one element matches. Disambiguate by what is actually
-    // tappable right now — duplicates that are off-screen, faded out or
-    // hidden are not real conflicts, and stacked layers of one control (a
-    // nav icon's two glyphs) count once. Uses the same tappability policy
-    // as the single-match path (strict for interactive targets, lenient for
-    // plain labels). This is the list the `/screen` dump numbers
-    // (`text_nth`/`semantics_nth`), so a catalog ref's `nth` always
-    // resolves to the widget it names.
-    final visible = walker.actableMatches(matches);
+    // More than one element matches. Disambiguate by what a person can see
+    // — duplicates that are off-screen, faded out or on a hidden route are
+    // not real conflicts, and stacked layers of one control (a nav icon's
+    // two glyphs) count once. This is the list every `nth` indexes,
+    // including the `/screen` dump's `text_nth`/`semantics_nth`, so a
+    // catalog ref's `nth` always resolves to the widget it names; the tap
+    // gate then judges that one widget.
+    final visible = walker.visibleMatches(matches);
 
     if (visible.isEmpty) {
       throw ActionFailure(
-        '${matches.length} elements match $desc, but none are visible and '
-        'tappable on screen. Scroll the target into view, or disambiguate '
-        'with a ValueKey.',
+        '${matches.length} elements match $desc, but none are visible on '
+        'screen. Scroll the target into view, or disambiguate with a '
+        'ValueKey.',
       );
     }
     if (nth != null) {
       if (nth < 0 || nth >= visible.length) {
         throw ActionFailure(
           'nth $nth is out of range for $desc: ${visible.length} matching '
-          'element(s) are visible and tappable — '
-          '${_describeCandidates([
-                for (final v in visible) v.$1
-              ], numbered: true)}.',
+          'element(s) are visible — '
+          '${_describeCandidates(visible, numbered: true)}.',
         );
       }
-      return visible[nth].$2;
+      return _confirmHittable(visible[nth], desc);
     }
     if (visible.length > 1) {
-      final candidates =
-          _describeCandidates([for (final v in visible) v.$1], numbered: true);
+      final candidates = _describeCandidates(visible, numbered: true);
       throw ActionFailure(
         'Ambiguous locator $desc: ${visible.length} matching elements are '
-        'visible and tappable — $candidates. Pass nth (0-based, reading '
-        'order: rows top to bottom, then left to right) or disambiguate '
-        'with a ValueKey.',
+        'visible — $candidates. Pass nth (0-based, reading order: rows top '
+        'to bottom, then left to right) or disambiguate with a ValueKey.',
       );
     }
-    return visible.single.$2;
+    return _confirmHittable(visible.single, desc);
   }
 
   /// Resolves the editable field for a `type`/`clear` target and confirms

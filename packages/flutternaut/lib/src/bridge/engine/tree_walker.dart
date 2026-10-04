@@ -446,8 +446,8 @@ class TreeWalker {
   /// (engine/catalog) derives `nth` from the `/screen` dump with the SAME
   /// rule ([_readingOrder] + [_kNearRowTolerance]), so the index a test
   /// records always resolves to the same widget. A candidate is:
-  /// - interactive (tap affordance, [_nodeEnabled] non-null — the same rule
-  ///   that puts `enabled` on a dump node),
+  /// - interactive (a control by [dumpState] — the same rule that puts
+  ///   `enabled` on a dump node),
   /// - no [ValueKey] and no visible text in its subtree (truly unlabeled),
   /// - on screen and unobstructed (the dump's visibility gates),
   /// - **outermost only**: a candidate's subtree is never searched for more
@@ -551,7 +551,7 @@ class TreeWalker {
   /// button does carry text — just not text a human (or locator) can use.
   bool _isUnlabeledInteractiveShell(Element element, Size? screen) {
     if (keyOf(element.widget) != null) return false;
-    if (_nodeEnabled(element) == null) return false;
+    if (dumpState(element) == null) return false;
     final text = _nodeText(element);
     if (text != null && _hasAlnum(text)) return false;
     return _isOnScreen(element, screen) && _isUnobstructed(element);
@@ -938,13 +938,6 @@ class TreeWalker {
     return false;
   }
 
-  /// The point to tap to reach [element], or null if a tap cannot reach it
-  /// right now — see [tapReach], which also says why.
-  Offset? reachableTapPoint(Element element) => switch (tapReach(element)) {
-        TapReachable(:final point) => point,
-        TapRefused() => null,
-      };
-
   /// Where a tap reaches [element] right now, or why it cannot.
   ///
   /// The centre is tried first; when something covers it (a badge, a
@@ -1120,27 +1113,6 @@ class TreeWalker {
       blocker: () => _describeBlocker(blocker),
       ancestorTook: true,
     );
-  }
-
-  /// The tap-reachable matches among [matches], in reading order, exactly
-  /// as the tap gate counts them — so the `nth` the `/screen` dump reports
-  /// (`text_nth` / `semantics_nth`) is the `nth` a tap resolves:
-  ///
-  ///  * a match that a person cannot see (offstage, faded out, clipped
-  ///    away) or cannot reach with a tap is not a candidate;
-  ///  * stacked copies of ONE control — two glyph layers of a nav icon, a
-  ///    cross-fading label — count once (see [_sameStackedControl]).
-  List<(Element, Offset)> actableMatches(List<Element> matches) {
-    final screen = _screenSize;
-    final out = <(Element, Offset)>[];
-    for (final element in inReadingOrder(matches)) {
-      if (!_isOnScreen(element, screen)) continue;
-      final point = reachableTapPoint(element);
-      if (point == null) continue;
-      if (out.any((kept) => _sameStackedControl(kept.$1, element))) continue;
-      out.add((element, point));
-    }
-    return out;
   }
 
   /// Whether [a] and [b] are two layers of the same on-screen control: they
@@ -1608,7 +1580,7 @@ class TreeWalker {
             ).toJson();
           }
           if (coverage == _Coverage.partial) node['partial'] = true;
-          final enabled = _nodeEnabled(element);
+          final enabled = dumpState(element);
           if (enabled != null) node['enabled'] = enabled;
           if (info.checked != null) node['checked'] = info.checked;
           nthIndex.annotate(element, node, nodeText, semantics);
@@ -1873,28 +1845,6 @@ class TreeWalker {
     return buttonLike ? extractText(element) : null;
   }
 
-  /// Enabled/disabled state to attach to a dump node: the widget's own
-  /// [_extractEnabled] (Material buttons, form fields), else — for a button-like
-  /// widget whose enabled state lives on an inner `InkWell`/`GestureDetector`
-  /// (custom buttons like `PrimaryCButton`, which set `onTap: null` and dim to
-  /// 0.45 opacity when disabled) — the nearest such descendant's tap-enabled
-  /// state. Null when it can't be determined (so the field is omitted).
-  bool? _nodeEnabled(Element element) {
-    final own = _tapEnabled(element.widget);
-    if (own != null) return own;
-    if (!_isButtonLike(element.widget)) return null;
-    bool? found;
-    void visit(Element e) {
-      if (found != null) return;
-      found = _tapEnabled(e.widget);
-      if (found != null) return;
-      e.visitChildren(visit);
-    }
-
-    element.visitChildren(visit);
-    return found;
-  }
-
   /// Whether [widget] reads as a button: a Material button, or an
   /// `InkWell`/`GestureDetector` acting as one.
   bool _isButtonLike(Widget widget) =>
@@ -1902,17 +1852,371 @@ class TreeWalker {
       widget is InkWell ||
       widget.runtimeType.toString().endsWith('Button');
 
-  /// A widget's tap-enabled state read directly off it: [_extractEnabled] for
-  /// Material widgets/fields, or whether an `InkWell`/`GestureDetector` has a
-  /// non-null `onTap` (a disabled custom button nulls its tap callback). Null
-  /// when the widget exposes no tap affordance.
-  bool? _tapEnabled(Widget widget) {
-    final material = _extractEnabled(widget);
-    if (material != null) return material;
-    // InkWell ⊂ InkResponse.
-    if (widget is InkResponse) return widget.onTap != null;
-    if (widget is GestureDetector) return widget.onTap != null;
+  // ---------------------------------------------------------------------------
+  // Control state (enabled / disabled)
+  // ---------------------------------------------------------------------------
+  //
+  // One rule answers "is this control enabled?" for the `/screen` dump (the
+  // catalog's `(disabled)`), the `near` shell check and the state assertions,
+  // so a catalog line and an `expect_disabled` on it can never disagree.
+
+  /// The enabled state a control widget declares itself, following
+  /// Flutter's own definition (`ButtonStyleButton.enabled`: `onPressed` or
+  /// `onLongPress` set). Null for a widget that is not one of these controls.
+  ///
+  /// A `ListTile` with no callbacks at all is not a control (a static info
+  /// row): null, not disabled. The `*ListTile` variants (switch, checkbox,
+  /// radio) are answered by the `ListTile` they build, which carries their
+  /// real state — a `RadioListTile` under a `RadioGroup` has no `onChanged`
+  /// of its own.
+  bool? _ownState(Widget w) {
+    if (w is ButtonStyleButton) return w.enabled;
+    if (w is MaterialButton) return w.enabled;
+    if (w is CupertinoButton) return w.enabled;
+    if (w is IconButton) return w.onPressed != null;
+    if (w is FloatingActionButton) return w.onPressed != null;
+    if (w is TextField) return w.enabled ?? true;
+    if (w is CupertinoTextField) return w.enabled;
+    if (w is Switch) return w.onChanged != null;
+    if (w is Checkbox) return w.onChanged != null;
+    if (w is CupertinoSwitch) return w.onChanged != null;
+    if (w is Slider) return w.onChanged != null;
+    if (w is CupertinoSlider) return w.onChanged != null;
+    if (w is DropdownButton) return w.onChanged != null;
+    if (w is PopupMenuButton) return w.enabled;
+    if (w is ListTile) {
+      if (!w.enabled) return false;
+      return (w.onTap ?? w.onLongPress) != null ? true : null;
+    }
     return null;
+  }
+
+  /// Whether [w] is a custom button — its type name ends in `Button` but it
+  /// is none of the controls [_ownState] knows. Its state lives on the
+  /// inner `InkWell`/`GestureDetector` it builds, where a nulled `onTap` is
+  /// the disabled signal (a `PrimaryCButton` dims and sets `onTap: null`).
+  bool _isNamedButton(Widget w) =>
+      _ownState(w) == null && w.runtimeType.toString().endsWith('Button');
+
+  /// The tap state of a generic tap surface (`InkWell`/`InkResponse`,
+  /// `GestureDetector`): enabled when it has a tap-like callback; disabled
+  /// when it has no callback at all — the way a custom control built on a
+  /// bare detector disables itself (`onTap: enabled ? submit : null`). A
+  /// detector that only handles drags or scales is not a tap control: null.
+  bool? _genericTapState(Widget w) {
+    if (w is InkResponse) {
+      final taps = w.onTap != null ||
+          w.onDoubleTap != null ||
+          w.onLongPress != null ||
+          w.onTapDown != null ||
+          w.onTapUp != null ||
+          w.onSecondaryTap != null;
+      return taps;
+    }
+    if (w is GestureDetector) {
+      final taps = w.onTap != null ||
+          w.onDoubleTap != null ||
+          w.onLongPress != null ||
+          w.onTapDown != null ||
+          w.onTapUp != null ||
+          w.onSecondaryTap != null ||
+          w.onLongPressStart != null;
+      if (taps) return true;
+      final drags = w.onVerticalDragStart != null ||
+          w.onVerticalDragUpdate != null ||
+          w.onHorizontalDragStart != null ||
+          w.onHorizontalDragUpdate != null ||
+          w.onPanStart != null ||
+          w.onPanUpdate != null ||
+          w.onScaleStart != null ||
+          w.onScaleUpdate != null;
+      return drags ? null : false;
+    }
+    return null;
+  }
+
+  /// Whether [w] is a `ListTile` that is not a control: enabled, with no
+  /// `onTap`/`onLongPress` — a static info row. The `InkWell` it builds has
+  /// no callbacks either, which must not read as a disabled control.
+  bool _isInertListTile(Widget w) =>
+      w is ListTile && w.enabled && w.onTap == null && w.onLongPress == null;
+
+  /// A custom button's state: whether the first `InkWell`/`GestureDetector`
+  /// it builds has an `onTap`. Null when it builds none.
+  bool? _namedButtonState(Element element) {
+    bool? found;
+    void visit(Element e) {
+      if (found != null) return;
+      final w = e.widget;
+      if (w is InkResponse) {
+        found = w.onTap != null;
+        return;
+      }
+      if (w is GestureDetector) {
+        found = w.onTap != null;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    element.visitChildren(visit);
+    return found;
+  }
+
+  /// The enabled state [element] carries as a control of its own — a known
+  /// control ([_ownState]), a custom `*Button` ([_namedButtonState]), or a
+  /// tap surface ([_genericTapState]) — or null when it is not one.
+  bool? _elementState(Element element) {
+    final own = _ownState(element.widget);
+    if (own != null) return own;
+    if (_isNamedButton(element.widget)) return _namedButtonState(element);
+    return _genericTapState(element.widget);
+  }
+
+  /// Whether [element] is a specific control: one whose state is its own
+  /// declaration (a Material/Cupertino control, a custom `*Button`), as
+  /// opposed to a generic tap surface that only says it reacts.
+  bool _isSpecificControl(Element element) =>
+      _ownState(element.widget) != null ||
+      (_isNamedButton(element.widget) && _namedButtonState(element) != null);
+
+  /// The control whose enabled state answers for [element] — the one the
+  /// `/screen` dump attaches `enabled` to — or null when [element] is not
+  /// part of any control. [labelOf] reads the label that ties a label run
+  /// together (visible text, or the accessibility label for a `semantics`
+  /// locator).
+  ///
+  ///  1. [element] itself when it is a specific control.
+  ///  2. Otherwise its **label run**: the ancestors that present the same
+  ///     label — a button's `Text`, its inner `GestureDetector`, its
+  ///     `InkWell`, the button — exactly the echoes the dump folds into one
+  ///     node. The first specific control in the run wins (the
+  ///     `FilledButton`, the `ListTile`); without one, the innermost tap
+  ///     surface — unless the run belongs to a static `ListTile` (no
+  ///     `onTap`), which is no control. The run ends at an ancestor with a
+  ///     different label (a
+  ///     caption is not owned by the page-wide detector around it, unless it
+  ///     is that detector's own label), at a scroll view or a route. A label
+  ///     inside a text field belongs to the field.
+  ///  3. With [descend], when nothing above owns it: the control [element]
+  ///     wraps through a single chain of children (a key on the `Padding`
+  ///     around a button, a `Tooltip` around one). A wrapper whose subtree
+  ///     branches before reaching a control (a `Dismissible` row) owns none.
+  Element? stateOwner(
+    Element element, {
+    required String? Function(Element) labelOf,
+    bool descend = false,
+  }) {
+    if (_isSpecificControl(element)) return element;
+    Element? generic =
+        _genericTapState(element.widget) != null ? element : null;
+
+    final label = labelOf(element);
+    Element? specific;
+    var inert = false;
+    if (label != null) {
+      var hops = 0;
+      element.visitAncestorElements((a) {
+        final w = a.widget;
+        if (w is Scrollable || _routeOfScope(a) != null) return false;
+        if (w is TextField || w is CupertinoTextField) {
+          specific = a;
+          return false;
+        }
+        if (++hops > _stateRunHops) return false;
+        if (_isInertListTile(w)) {
+          inert = true;
+          return false;
+        }
+        final isSpecific = _isSpecificControl(a);
+        final surface = _genericTapState(w) != null;
+        if (!isSpecific && !surface && !_isMeaningful(a)) return true;
+        if (labelOf(a) != label) return false;
+        if (isSpecific) {
+          specific = a;
+          return false;
+        }
+        if (surface) generic ??= a;
+        return true;
+      });
+    }
+    if (specific != null) return specific;
+    // A static ListTile's row: its InkWell's empty callbacks are not a
+    // disabled control.
+    if (inert) return null;
+    if (generic != null) return generic;
+    return descend ? _wrappedControl(element) : null;
+  }
+
+  /// How far up [stateOwner] follows a label run: a Material button's label
+  /// sits a dozen or more elements below the button widget itself.
+  static const int _stateRunHops = 40;
+
+  /// The control [element] wraps through a single chain of children — the
+  /// first specific control on the chain, else its first tap surface — or
+  /// null when the subtree branches first.
+  Element? _wrappedControl(Element element) {
+    Element? generic;
+    var current = element;
+    for (var depth = 0; depth < _wrapperChainDepth; depth++) {
+      final children = <Element>[];
+      current.visitChildren(children.add);
+      if (children.length != 1) break;
+      current = children.single;
+      // A static ListTile is no control, and nor is the InkWell it builds.
+      if (_isInertListTile(current.widget)) return null;
+      if (_isSpecificControl(current)) return current;
+      if (_genericTapState(current.widget) != null) generic ??= current;
+    }
+    return generic;
+  }
+
+  /// How deep [_wrappedControl] follows a single-child chain.
+  static const int _wrapperChainDepth = 32;
+
+  /// The label that ties a **text** label run together: the element's own
+  /// text, or — for a control or other meaningful widget — the first text
+  /// it shows (what the dump labels its node with). Normalized like every
+  /// text match.
+  String? textRunLabel(Element element) {
+    final own = _widgetOwnText(element.widget);
+    if (own != null) return normalizeText(own);
+    final w = element.widget;
+    if (_elementState(element) != null || _isButtonLike(w) || w is ListTile) {
+      final text = extractText(element);
+      return text == null ? null : normalizeText(text);
+    }
+    return null;
+  }
+
+  /// The enabled state the `/screen` dump attaches to [element]'s node: the
+  /// state of the control that owns it ([stateOwner] over its text run),
+  /// or null when it is not part of a control.
+  bool? dumpState(Element element) {
+    final owner = stateOwner(element, labelOf: textRunLabel);
+    return owner == null ? null : _elementState(owner);
+  }
+
+  /// Resolves the control a state assertion (`/assert_enabled`,
+  /// `/assert_disabled`, `/is_enabled`) checks, from a `key`, `text`
+  /// (compared in [match] mode) or `semantics` locator.
+  ///
+  /// The target must be on the page in front: a match on a page hidden
+  /// under a dialog or sheet, on a closing route or in an offstage tab does
+  /// not count, but one scrolled out of view or under the keyboard does —
+  /// a button's state does not depend on where the list is scrolled. With
+  /// [nth], the nth match of the visible list every route indexes
+  /// ([visibleMatches]). Several matches that belong to one control (a
+  /// label's `Text` and the `RichText` inside it) are one target; several
+  /// controls are ambiguous. The chosen match answers through the control
+  /// that owns it ([stateOwner]) — a button's label through the button.
+  StateTarget resolveStateTarget({
+    String? key,
+    String? text,
+    String? semantics,
+    TextMatch match = TextMatch.exact,
+    int? nth,
+  }) {
+    final String desc;
+    final List<Element> matches;
+    final String? Function(Element) labelOf;
+    if (key != null) {
+      desc = 'key "$key"';
+      matches = findAllElementsByKey(key);
+      labelOf = textRunLabel;
+    } else if (text != null) {
+      desc = match.describe(text);
+      matches = findAllElementsByTextMatch(text, match);
+      labelOf = textRunLabel;
+    } else if (semantics != null) {
+      desc = 'semantics "$semantics"';
+      matches = findAllElementsBySemantics(semantics);
+      labelOf = semanticsOf;
+    } else {
+      throw ArgumentError('a "key", "text" or "semantics" locator is required');
+    }
+    if (matches.isEmpty) return StateMissing('no widget matches $desc');
+
+    Element? owner(Element e) => stateOwner(e, labelOf: labelOf, descend: true);
+
+    if (nth != null) {
+      final visible = visibleMatches(matches);
+      if (nth < 0 || nth >= visible.length) {
+        return StateMissing('nth $nth is out of range for $desc: '
+            '${visible.length} visible match(es)');
+      }
+      final control = owner(visible[nth]);
+      return control == null
+          ? StateNotAControl(desc)
+          : StateFound(
+              control, controlState(control), describeControl(control));
+    }
+
+    final layers = _routeLayers();
+    final present = <Element>[];
+    String? hiddenWhy;
+    for (final e in inReadingOrder(matches)) {
+      if (_isOffstage(e)) {
+        hiddenWhy ??= 'is offstage (an inactive tab or a page kept alive '
+            'underneath)';
+        continue;
+      }
+      if (layers.hides(e)) {
+        hiddenWhy ??= 'is on a route hidden behind a dialog/sheet/page, or on '
+            'a route that is closing';
+        continue;
+      }
+      present.add(e);
+    }
+    if (present.isEmpty) {
+      return StateMissing('$desc exists but ${hiddenWhy ?? 'is not laid out'}');
+    }
+
+    final controls = <Element?>[];
+    for (final e in present) {
+      final control = owner(e);
+      if (!controls.any((c) => identical(c, control))) controls.add(control);
+    }
+    if (controls.length > 1) {
+      final named = [
+        for (final c in controls)
+          c == null ? 'a non-control' : describeControl(c),
+      ].join('; ');
+      return StateMissing('$desc is ambiguous: it names ${controls.length} '
+          'widgets ($named). Pass nth (0-based, reading order of the visible '
+          'matches) or use a ValueKey');
+    }
+    final control = controls.single;
+    return control == null
+        ? StateNotAControl(desc)
+        : StateFound(control, controlState(control), describeControl(control));
+  }
+
+  /// The enabled state of [owner], a control returned by [stateOwner].
+  bool controlState(Element owner) {
+    final state = _elementState(owner);
+    if (state == null) {
+      throw StateError('${owner.widget.runtimeType} is not a control');
+    }
+    return state;
+  }
+
+  /// How a control reads in a state assertion's message:
+  /// `FilledButton "Log in"`, `IconButton (semantics "Close")`,
+  /// `ListTile key "row_3"`.
+  String describeControl(Element owner) {
+    final type = owner.widget.runtimeType.toString();
+    final key = keyOf(owner.widget);
+    final text = extractText(owner);
+    final parts = <String>[type];
+    if (key != null) parts.add('key "$key"');
+    if (text != null && _hasAlnum(text)) {
+      parts.add('"${normalizeText(text)}"');
+    } else {
+      final semantics = semanticsOf(owner);
+      if (semantics != null) parts.add('(semantics "$semantics")');
+    }
+    return parts.join(' ');
   }
 
   // ---------------------------------------------------------------------------
@@ -2065,8 +2369,6 @@ class TreeWalker {
       );
     }
 
-    final screen = _screenSize;
-    final layers = _routeLayers();
     final ordered = inReadingOrder(matches);
     if (ordered.isEmpty) {
       return VisibilityResult(
@@ -2077,16 +2379,7 @@ class TreeWalker {
       );
     }
 
-    final visible = <(Element, VisibilityResult)>[];
-    VisibilityResult? firstHidden;
-    for (final element in ordered) {
-      final result = _visibilityOf(element, screen, layers, desc);
-      if (!result.visible) {
-        firstHidden ??= result;
-      } else if (!visible.any((v) => _sameStackedControl(v.$1, element))) {
-        visible.add((element, result));
-      }
-    }
+    final (:visible, :firstHidden) = _scanVisible(ordered, desc);
 
     if (nth != null) {
       if (nth >= 0 && nth < visible.length) return visible[nth].$2;
@@ -2102,6 +2395,37 @@ class TreeWalker {
     }
     if (visible.isNotEmpty) return visible.first.$2;
     return firstHidden!;
+  }
+
+  /// The matches a person can see, in reading order, stacked copies of one
+  /// control (a nav icon's two glyph layers, a cross-fading label) counted
+  /// once — **the one list every `nth` indexes**: visibility waits and
+  /// assertions, taps, state assertions and the `/screen` dump's
+  /// `text_nth`/`semantics_nth`. An action then checks what it needs of the
+  /// chosen match (a tap: that it is reachable) and fails loudly when that
+  /// does not hold, rather than silently counting differently.
+  List<Element> visibleMatches(List<Element> matches) => [
+        for (final v in _scanVisible(inReadingOrder(matches), '').visible) v.$1,
+      ];
+
+  /// The visible matches among [ordered] (already in reading order) with
+  /// their results, stacked copies merged, and the first hidden match's
+  /// result — the reason given when nothing is visible.
+  ({List<(Element, VisibilityResult)> visible, VisibilityResult? firstHidden})
+      _scanVisible(List<Element> ordered, String desc) {
+    final screen = _screenSize;
+    final layers = _routeLayers();
+    final visible = <(Element, VisibilityResult)>[];
+    VisibilityResult? firstHidden;
+    for (final element in ordered) {
+      final result = _visibilityOf(element, screen, layers, desc);
+      if (!result.visible) {
+        firstHidden ??= result;
+      } else if (!visible.any((v) => _sameStackedControl(v.$1, element))) {
+        visible.add((element, result));
+      }
+    }
+    return (visible: visible, firstHidden: firstHidden);
   }
 
   /// Whether [element] is visible to a person looking at the screen — the
@@ -2206,7 +2530,7 @@ class TreeWalker {
     return clear == 0 ? _Coverage.covered : _Coverage.partial;
   }
 
-  /// The points [_coverage] and [reachableTapPoint] sample on [element]:
+  /// The points [_coverage] and [tapReach] sample on [element]:
   /// its visible rect's centre first, then four points inset 25% towards
   /// each corner. Empty when the element has no visible geometry.
   List<Offset> _samplePoints(Element element, {Size? screen}) {
@@ -2620,21 +2944,21 @@ class _RouteLayers {
   }
 }
 
-/// Computes, for dump nodes, the `nth` a text or semantics tap would need
-/// to reach them — using the tap gate's own candidate list
-/// ([TreeWalker.actableMatches]) — so a catalog ref resolves to exactly
+/// Computes, for dump nodes, the `nth` a text or semantics locator needs
+/// to reach them — the one visible-match list every route indexes
+/// ([TreeWalker.visibleMatches]) — so a catalog ref resolves to exactly
 /// the widget it names even when its label repeats on screen.
 ///
 /// Emitted as `text_nth`/`text_matches` and `semantics_nth`/
-/// `semantics_matches`, only when the label has more than one actable
+/// `semantics_matches`, only when the label has more than one visible
 /// match and the node is one of them. Candidate lists are computed once
 /// per label per dump.
 class _NthIndex {
   _NthIndex(this._walker);
 
   final TreeWalker _walker;
-  final Map<String, List<(Element, Offset)>> _byText = {};
-  final Map<String, List<(Element, Offset)>> _bySemantics = {};
+  final Map<String, List<Element>> _byText = {};
+  final Map<String, List<Element>> _bySemantics = {};
 
   void annotate(
     Element node,
@@ -2645,14 +2969,14 @@ class _NthIndex {
     if (text != null && text.isNotEmpty) {
       final candidates = _byText.putIfAbsent(text, () {
         final matches = _walker.findAllElementsByText(text);
-        return matches.length > 1 ? _walker.actableMatches(matches) : const [];
+        return matches.length > 1 ? _walker.visibleMatches(matches) : const [];
       });
       _emit(node, out, 'text', candidates);
     }
     if (semantics != null) {
       final candidates = _bySemantics.putIfAbsent(semantics, () {
         final matches = _walker.findAllElementsBySemantics(semantics);
-        return matches.length > 1 ? _walker.actableMatches(matches) : const [];
+        return matches.length > 1 ? _walker.visibleMatches(matches) : const [];
       });
       _emit(node, out, 'semantics', candidates);
     }
@@ -2662,11 +2986,11 @@ class _NthIndex {
     Element node,
     Map<String, dynamic> out,
     String prefix,
-    List<(Element, Offset)> candidates,
+    List<Element> candidates,
   ) {
     if (candidates.length < 2) return;
     final index = candidates.indexWhere(
-      (c) => _related(c.$1, node),
+      (c) => _related(c, node),
     );
     if (index < 0) return;
     out['${prefix}_nth'] = index;
@@ -2691,6 +3015,55 @@ class _NthIndex {
     });
     return found;
   }
+}
+
+/// The control a state assertion checks, or why there is none
+/// ([TreeWalker.resolveStateTarget]).
+sealed class StateTarget {
+  const StateTarget();
+}
+
+/// The locator names [control], which is [enabled]; [description] names it
+/// in messages (`FilledButton "Log in"`).
+final class StateFound extends StateTarget {
+  /// The control that owns the matched widget.
+  final Element control;
+
+  /// Whether [control] is enabled.
+  final bool enabled;
+
+  /// How [control] reads in a message.
+  final String description;
+
+  /// Creates a found target.
+  const StateFound(this.control, this.enabled, this.description);
+}
+
+/// Nothing the assertion can check is there right now — no match, only
+/// hidden ones, an `nth` out of range, or several controls (ambiguous).
+/// [reason] says which; the screen may change, so it can be re-checked.
+final class StateMissing extends StateTarget {
+  /// Why there is no target.
+  final String reason;
+
+  /// Creates a missing target.
+  const StateMissing(this.reason);
+}
+
+/// The locator names a widget that is not part of any control — a caption,
+/// a static row — so "enabled" means nothing for it. Final: waiting does
+/// not turn a caption into a button.
+final class StateNotAControl extends StateTarget {
+  /// The locator, as messages name it (`text "Total"`).
+  final String desc;
+
+  /// Creates a not-a-control target.
+  const StateNotAControl(this.desc);
+
+  /// The reason a state assertion reports.
+  String get reason => '$desc is not part of any control (a button, switch, '
+      'checkbox, slider, field or a tile with onTap), so it is neither '
+      'enabled nor disabled — address the control itself';
 }
 
 /// Why a tap cannot reach a target right now ([TreeWalker.tapReach]).

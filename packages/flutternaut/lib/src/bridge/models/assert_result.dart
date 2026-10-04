@@ -15,12 +15,21 @@ class AssertResult {
   /// The expected value (for text comparison assertions).
   final String? expected;
 
+  /// The control a state assertion checked (`FilledButton "Log in"`).
+  final String? control;
+
+  /// Whether a failure is final: re-checking cannot make it pass (the
+  /// locator names no control at all), so a caller must not wait on it.
+  final bool isFinal;
+
   /// Creates an [AssertResult].
   const AssertResult({
     required this.passed,
     required this.message,
     this.actual,
     this.expected,
+    this.control,
+    this.isFinal = false,
   });
 
   /// Serializes this result to a JSON map.
@@ -29,6 +38,8 @@ class AssertResult {
         'message': message,
         if (actual != null) 'actual': actual,
         if (expected != null) 'expected': expected,
+        if (control != null) 'control': control,
+        if (isFinal) 'final': true,
       };
 
   @override

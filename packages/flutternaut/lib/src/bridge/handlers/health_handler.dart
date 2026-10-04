@@ -26,7 +26,19 @@ class HealthHandler {
   /// `/long_press`; any other `match` is a 400 instead of a silent exact
   /// match. `/long_press` honours `match` (it ignored it before), and the
   /// `contains` needle is normalized like the text it is compared with.
-  static const String protocolVersion = '1.4.0';
+  ///
+  /// 1.5.0 — one rule for a control's enabled state, shared by the
+  /// `/screen` dump and the state routes: `/assert_enabled`,
+  /// `/assert_disabled` and `/is_enabled` answer for the **control** that
+  /// owns the matched widget (a button's label answers with the button's
+  /// state; it used to read the label itself and report "enabled"), honour
+  /// `match`, `semantics` and `nth`, skip pages hidden under a dialog, name
+  /// the control (`control`) and mark a locator that names no control as a
+  /// `final` failure. `/assert_text_equals` and `/assert_text_contains` see
+  /// only visible text (they searched the whole tree). Every `nth` — taps,
+  /// waits, state routes and the dump's `text_nth`/`semantics_nth` — indexes
+  /// one list: the visible matches in reading order.
+  static const String protocolVersion = '1.5.0';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

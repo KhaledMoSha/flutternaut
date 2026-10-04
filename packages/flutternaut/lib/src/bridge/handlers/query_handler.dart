@@ -53,11 +53,24 @@ class QueryHandler {
     });
   }
 
+  /// The enabled state of the control the locator names (see
+  /// [TreeWalker.resolveStateTarget]): `found` with `enabled` and `control`,
+  /// or `found: false` with the `reason` there is none to read.
   Future<Map<String, dynamic>> _isEnabled(BridgeRequest req) async {
+    req.requireLocator();
     return _runner.run<Map<String, dynamic>>(() {
-      final info = resolveLocator(req, _walker);
-      if (info == null) return {'found': false, 'enabled': false};
-      return {'found': true, 'enabled': info.enabled ?? true};
+      return switch (resolveStateLocator(req, _walker)) {
+        StateFound(:final enabled, :final description) => {
+            'found': true,
+            'enabled': enabled,
+            'control': description,
+          },
+        StateMissing(:final reason) => {'found': false, 'reason': reason},
+        final StateNotAControl notAControl => {
+            'found': false,
+            'reason': notAControl.reason,
+          },
+      };
     });
   }
 }
