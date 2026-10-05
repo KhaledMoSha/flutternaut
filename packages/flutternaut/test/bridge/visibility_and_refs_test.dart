@@ -265,6 +265,199 @@ void main() {
     });
   });
 
+  group('a wrapper never borrows a label it does not show', () {
+    // An app-wide detector around the navigator (keyboard dismiss) with a
+    // page kept under the current one: the label search used to take the
+    // first text in tree order — the hidden page's — and report a
+    // full-screen "العربية" button no one can see.
+    testWidgets(
+        'an app-wide detector takes no text from a page kept underneath',
+        (tester) async {
+      final navKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: navKey,
+        builder: (context, child) => GestureDetector(
+          onVerticalDragDown: (_) {},
+          child: child,
+        ),
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topRight,
+            child: GestureDetector(
+              onTap: () {},
+              child: const Text('العربية'),
+            ),
+          ),
+        ),
+      ));
+      navKey.currentState!.push(MaterialPageRoute<void>(
+        builder: (_) => Scaffold(
+          body: Column(children: [
+            TextButton(onPressed: () {}, child: const Text('Rate your order')),
+            IconButton(onPressed: () {}, icon: const Icon(Icons.close)),
+          ]),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      final all = nodes();
+      expect(all.map((n) => n['text']), isNot(contains('العربية')));
+      final wrapper = all.firstWhere((n) => n['type'] == 'GestureDetector');
+      expect(wrapper.containsKey('text'), isFalse,
+          reason: 'the app-wide detector is a container, not a button: $wrapper');
+      // The real control keeps its own node instead of being dropped as an
+      // echo of a wrapper label.
+      expect(
+        all.where((n) =>
+            n['type'] == 'TextButton' && n['text'] == 'Rate your order'),
+        hasLength(1),
+      );
+    });
+
+    testWidgets(
+        'a detector around a list is not labelled by its first row, and '
+        'the row stays a node of its own', (tester) async {
+      await tester.pumpWidget(_app(GestureDetector(
+        onTap: () {},
+        child: ListView(children: [
+          for (var i = 0; i < 3; i++)
+            TextButton(onPressed: () {}, child: Text('Row $i')),
+        ]),
+      )));
+
+      final all = nodes();
+      final wrapper = all.firstWhere((n) => n['type'] == 'GestureDetector');
+      expect(wrapper.containsKey('text'), isFalse, reason: '$wrapper');
+      expect(
+        all.where((n) => n['type'] == 'TextButton' && n['text'] == 'Row 0'),
+        hasLength(1),
+      );
+    });
+
+    testWidgets('a button whose only text is offstage carries no label',
+        (tester) async {
+      await tester.pumpWidget(_app(Center(
+        child: GestureDetector(
+          onTap: () {},
+          child: const SizedBox(
+            width: 48,
+            height: 48,
+            child: Offstage(child: Text('Hidden caption')),
+          ),
+        ),
+      )));
+
+      expect(nodes().map((n) => n['text']), isNot(contains('Hidden caption')));
+    });
+
+    // A `near` anchor resolves against the text element's own rect, not
+    // the control the label belongs to. A sheet labelled by its title is
+    // far taller than the title row, so the dump reports the title's rect
+    // for the catalog to count rows by.
+    testWidgets(
+        'a label read off a descendant reports that text\'s rect as '
+        'label_rect; an own text reports none', (tester) async {
+      await tester.pumpWidget(_app(Align(
+        alignment: Alignment.bottomCenter,
+        child: GestureDetector(
+          onTap: () {},
+          child: SizedBox(
+            height: 300,
+            child: Column(children: [
+              Row(children: [
+                const Text('Rate your order'),
+                IconButton(onPressed: () {}, icon: const Icon(Icons.close)),
+              ]),
+              const Expanded(child: SizedBox()),
+            ]),
+          ),
+        ),
+      )));
+
+      final sheet = nodes().firstWhere((n) =>
+          n['type'] == 'GestureDetector' && n['text'] == 'Rate your order');
+      final title = tester.getRect(find.text('Rate your order'));
+      expect(sheet['label_rect'], {
+        'x': title.left,
+        'y': title.top,
+        'w': title.width,
+        'h': title.height,
+      });
+      expect((sheet['rect'] as Map)['h'], greaterThan(title.height));
+
+      final ownText = nodes().where((n) => n['type'] == 'Text');
+      expect(ownText.every((n) => !n.containsKey('label_rect')), isTrue);
+    });
+
+    // A bag button drawn as `[2] Bag · 73.48`: the badge comes first in
+    // the tree, but it is the cart's state, not the button's name — a test
+    // recorded against "2" fails as soon as the cart holds something else.
+    testWidgets(
+        'a count badge before the words does not name the button; '
+        'label_rect follows the words', (tester) async {
+      await tester.pumpWidget(_app(Center(
+        child: GestureDetector(
+          onTap: () {},
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('2'),
+            SizedBox(width: 8),
+            Text('Bag · 73.48'),
+          ]),
+        ),
+      )));
+
+      final bag = nodes().firstWhere((n) => n['type'] == 'GestureDetector');
+      expect(bag['text'], 'Bag · 73.48');
+      final words = tester.getRect(find.text('Bag · 73.48'));
+      expect(bag['label_rect'], {
+        'x': words.left,
+        'y': words.top,
+        'w': words.width,
+        'h': words.height,
+      });
+    });
+
+    testWidgets('a control that shows only digits keeps them as its label',
+        (tester) async {
+      await tester.pumpWidget(_app(Center(
+        child: GestureDetector(onTap: () {}, child: const Text('3')),
+      )));
+
+      expect(
+        nodes().where((n) => n['type'] == 'GestureDetector' && n['text'] == '3'),
+        hasLength(1),
+      );
+    });
+
+    testWidgets('an icon glyph before the words does not name the button',
+        (tester) async {
+      await tester.pumpWidget(_app(Center(
+        child: GestureDetector(
+          onTap: () {},
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.shopping_bag),
+            Text('Bag'),
+          ]),
+        ),
+      )));
+
+      final bag = nodes().firstWhere((n) => n['type'] == 'GestureDetector');
+      expect(bag['text'], 'Bag');
+    });
+
+    testWidgets('an ordinary button still reads its label', (tester) async {
+      await tester.pumpWidget(_app(Center(
+        child: ElevatedButton(onPressed: () {}, child: const Text('Continue')),
+      )));
+
+      expect(
+        nodes().where(
+            (n) => n['type'] == 'ElevatedButton' && n['text'] == 'Continue'),
+        hasLength(1),
+      );
+    });
+  });
+
   group('occlusion sampling', () {
     testWidgets(
         'an open drawer hides the page labels under it, even where '

@@ -27,6 +27,13 @@
 * `/assert_text_equals` and `/assert_text_contains` see only **visible** text — the `/assert_visible` rule. Before, they searched the whole tree, so text on a page under a dialog or in an offstage tab satisfied them.
 * Every `nth` indexes one list: the visible matches in reading order, stacked copies of one control counted once. `/tap`, `/long_press`, the visibility routes, the state routes and the dump's `text_nth`/`semantics_nth` agree. A tap then checks that the chosen match takes taps, and refuses it (naming what swallows the pointer) instead of skipping it when numbering — so a duplicate behind an `IgnorePointer` keeps its number.
 * Bridge protocol 1.5.0.
+* A button's label in `/screen` is text the user can see. It used to be the first text anywhere inside it, so an app-wide `GestureDetector` (a keyboard-dismiss wrapper) was listed as a full-screen button named after text on a page kept underneath. The label search now skips hidden pages, offstage tabs and faded or clipped text, and stops at a scroll view, navigator or overlay: a detector around a whole page or list is a container, not a button.
+* Words name a button: `[2] Bag · 73.48` is labelled "Bag · 73.48", not its count badge "2". A control that shows only digits or an icon keeps that text.
+* A node whose label was read off a descendant reports `label_rect`, the rect of that text — what a `near` locator anchored on the label measures rows by.
+* A scroll, swipe, fling or drag moves past the touch slop before it waits for a frame. On an app whose next frame took longer than a long press, a scroll used to fire an `onLongPress` wrapped around the app (e.g. `requests_inspector`) instead of scrolling.
+* A tap target wholly outside the screen, or clipped away by its scroll view, is refused as off screen ("it is on a page or part of a list that is not showing"), not as a route transition, when no transition is running.
+* `/type` and `/clear_text` by label skip labels and fields on a page kept underneath or in an offstage tab. A form pushed over a page with the same form used to type into — or be refused as covering — the hidden page's field.
+* Bridge protocol 1.5.1.
 
 ## 0.0.6 — 2026-04-10
 

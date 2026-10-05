@@ -103,11 +103,14 @@ class TreeWalker {
   /// one declared by a close ancestor (`Tooltip(message:, child: button)`
   /// wraps the control it describes — through a few internal widgets of
   /// its own). The ancestor walk stops at another control or scroll view
-  /// so a label is never borrowed from an unrelated container.
+  /// so a label is never borrowed from an unrelated container. The subtree
+  /// search stops at the same [_isLabelBoundary] as a node's text label and
+  /// skips a label the user cannot see ([_isOnScreen]).
   String? semanticsOf(Element element) {
     final own = ownSemanticsOf(element.widget);
     if (own != null) return own;
 
+    final screen = _screenSize;
     String? found;
     void visit(Element child) {
       if (found != null) return;
@@ -116,8 +119,12 @@ class TreeWalker {
       // next to the button itself.
       final w = child.widget;
       if (_isButtonLike(w) || _extractEnabled(w) != null) return;
-      found = ownSemanticsOf(w);
-      if (found != null) return;
+      if (_isLabelBoundary(w)) return;
+      final label = ownSemanticsOf(w);
+      if (label != null) {
+        if (_isOnScreen(child, screen)) found = label;
+        return;
+      }
       child.visitChildren(visit);
     }
 
@@ -366,8 +373,26 @@ class TreeWalker {
 
   /// Resolves the visible label [text] to the [EditableText] element of
   /// its associated field. See [findControllerByText] for the order.
+  ///
+  /// The label is the first match, in tree order, that is not structurally
+  /// hidden — on a route hidden behind another page, dialog or sheet, or
+  /// under an active `Offstage` (an inactive tab). A page kept underneath
+  /// the current one often carries the same form at the same place (an
+  /// edit-menu page under a new-category page, both titled "Name in
+  /// English"); taking its label typed into — or, gated, refused as
+  /// occluded — a field the user cannot see. Opacity, position and coverage
+  /// are deliberately not judged on the label: a filled field's hint is
+  /// faded out yet still names the field, and a field below the fold is
+  /// brought into view by the gate.
   Element? _resolveEditableElementByText(String text) {
-    final el = _findElementWhere(_textMatcher(text, TextMatch.exact));
+    final layers = _routeLayers();
+    Element? el;
+    for (final match
+        in _findAllElementsWhere(_textMatcher(text, TextMatch.exact))) {
+      if (layers.hides(match) || _isOffstage(match)) continue;
+      el = match;
+      break;
+    }
     if (el == null) return null;
 
     final enclosing = _enclosingEditableElement(el);
@@ -375,7 +400,7 @@ class TreeWalker {
 
     final labelRect = _rectOf(el);
     if (labelRect == null) return null;
-    return _nearestFieldElement(labelRect);
+    return _nearestFieldElement(labelRect, layers);
   }
 
   /// The [EditableTextState] for an [EditableText] element, or null.
@@ -460,6 +485,7 @@ class TreeWalker {
     if (anchorRect == null || root == null) return const [];
 
     final screen = _screenSize;
+    final layers = _routeLayers();
     final candidates = <({ElementRect rect, Element el})>[];
 
     void visit(Element element) {
@@ -469,7 +495,7 @@ class TreeWalker {
       // with readable text centered inside it is pruned but NOT a
       // candidate — the catalog labels that control with the inner text
       // (its labelIconButtons pass), so it is addressable without `near`.
-      if (_isUnlabeledInteractiveShell(element, screen)) {
+      if (_isUnlabeledInteractiveShell(element, screen, layers)) {
         final rect = _rectOf(element);
         if (rect != null &&
             _yOverlaps(rect, anchorRect) &&
@@ -549,10 +575,14 @@ class TreeWalker {
   /// "Unlabeled" means no **readable** text: an [Icon]'s glyph renders as a
   /// private-use character through an internal [RichText], so an icon-only
   /// button does carry text — just not text a human (or locator) can use.
-  bool _isUnlabeledInteractiveShell(Element element, Size? screen) {
+  bool _isUnlabeledInteractiveShell(
+    Element element,
+    Size? screen,
+    _RouteLayers layers,
+  ) {
     if (keyOf(element.widget) != null) return false;
     if (dumpState(element) == null) return false;
-    final text = _nodeText(element);
+    final text = _nodeText(element, screen, layers);
     if (text != null && _hasAlnum(text)) return false;
     return _isOnScreen(element, screen) && _isUnobstructed(element);
   }
@@ -976,6 +1006,27 @@ class TreeWalker {
         blocker: 'nothing (the target is not attached to a view)',
       );
     }
+    // Wholly outside the screen or clipped away by its scroll view while no
+    // route transition runs: no point of it can be hit (a hit test outside
+    // the view or a clip reaches nothing), and saying "nothing receives
+    // pointers — a transition" would send the reader to wait for one that
+    // never ends. Typical: a page of a PageView that is not showing (a debug
+    // overlay's hidden page). During a transition a target sliding through
+    // the edge is the transition's doing, and that verdict below stands.
+    final screen = _screenSize;
+    final visible = _visibleRect(element, screen);
+    if ((visible == null || visible.width <= 0 || visible.height <= 0) &&
+        !isTransitioning) {
+      final where = screen == null
+          ? 'outside the screen'
+          : 'outside the ${_fmtSize(screen)} screen';
+      return TapRefused(
+        TapRefusal.offScreen,
+        center: center,
+        blocker: '$where, or clipped away by the view it scrolls in — it '
+            'is on a page or part of a list that is not showing',
+      );
+    }
 
     final points = [center, ..._samplePoints(element).skip(1)];
     final hits = [for (final point in points) _hitTest(root, point)];
@@ -1002,6 +1053,10 @@ class TreeWalker {
         (verdict.ancestorTook ? TapRefusal.inputBlocked : TapRefusal.covered);
     return TapRefused(refusal, center: center, blocker: verdict.blocker());
   }
+
+  /// [size] as `402x874` (logical pixels, whole numbers).
+  static String _fmtSize(Size size) =>
+      '${size.width.toStringAsFixed(0)}x${size.height.toStringAsFixed(0)}';
 
   /// Hit-tests [root] at the global logical [point].
   HitTestResult _hitTest(RenderView root, Offset point) {
@@ -1563,11 +1618,17 @@ class TreeWalker {
           : _Coverage.covered;
       if (coverage != _Coverage.covered) {
         final info = extractInfo(element);
-        final nodeText = _nodeText(element);
+        final label = _nodeLabel(element, screen, layers);
+        final nodeText = label?.text;
         if (!_isRedundant(element, info, nodeText, parentLabel)) {
           node = <String, dynamic>{'type': info.type};
           if (info.key != null) node['key'] = info.key;
           if (nodeText != null) node['text'] = nodeText;
+          // A label read off a descendant text: that text's own rect, the
+          // one a `near` locator anchored on this label measures rows by.
+          final source = label?.source;
+          final labelRect = source == null ? null : _rectOf(source);
+          if (labelRect != null) node['label_rect'] = labelRect.toJson();
           final semantics = semanticsOf(element);
           if (semantics != null) node['semantics'] = semantics;
           final rect = _visibleRect(element, screen);
@@ -1830,20 +1891,90 @@ class TreeWalker {
 
   /// Text to attach to a node in [dumpVisibleTree]: the element's own
   /// text for [Text]/[EditableText]; for button-like widgets, the
-  /// label found by an unbounded descendant scan (so a button still
-  /// reads "Continue" through Material internals); null for structural
+  /// label its subtree shows ([_subtreeLabel] — so a button still reads
+  /// "Continue" through Material internals); null for structural
   /// wrappers (so `LayoutId`/`KeyedSubtree`/`InheritedWidget` don't
   /// inherit a descendant's text).
-  String? _nodeText(Element element) {
-    final own = _widgetOwnText(element.widget);
-    if (own != null) return own;
+  String? _nodeText(Element element, Size? screen, _RouteLayers layers) =>
+      _nodeLabel(element, screen, layers)?.text;
 
-    final widget = element.widget;
-    final buttonLike = _isButtonLike(widget);
+  /// [_nodeText] plus the descendant that supplied it — null [source] when
+  /// the text is the element's own. The source's rect is what a `near`
+  /// locator anchored on this label resolves against
+  /// ([GestureDispatcher.resolveNearActable] finds the text element
+  /// itself), so the dump reports it as `label_rect`.
+  ({String text, Element? source})? _nodeLabel(
+    Element element,
+    Size? screen,
+    _RouteLayers layers,
+  ) {
+    final own = _widgetOwnText(element.widget);
+    if (own != null) return (text: own, source: null);
+
     // Only interactive widgets carry a "label"; structural wrappers
     // return null so they don't bubble a descendant's text.
-    return buttonLike ? extractText(element) : null;
+    if (!_isButtonLike(element.widget)) return null;
+    return _subtreeLabel(element, screen, layers);
   }
+
+  /// The label a button-like [element] shows, and the descendant showing
+  /// it: among the descendant texts the user can see — on screen
+  /// ([_isOnScreen]) and not on a hidden route — the first, in tree order,
+  /// that contains a letter; the first of them when none does.
+  ///
+  /// Words name a control; a bare number beside them is its state. A bag
+  /// button drawn as `[2] Bag · 73.48` is "Bag · 73.48", not its item-count
+  /// badge "2" — a label that changes with the cart, so a test recorded
+  /// against it fails as soon as the cart holds something else. A control
+  /// that shows only digits or a glyph (a "3" tip chip) keeps that text.
+  ///
+  /// The search never enters a [_isLabelBoundary]. A detector wrapped
+  /// around a whole page, list or navigator (an app-wide
+  /// keyboard-dismiss `GestureDetector`) is a container, not a button:
+  /// labelling it with whatever text comes first inside — a page kept
+  /// under the current one, the first row of a list — reports text that
+  /// is not on screen, and makes the dump drop the real control carrying
+  /// that text as an echo of its parent's label.
+  ({String text, Element source})? _subtreeLabel(
+    Element element,
+    Size? screen,
+    _RouteLayers layers,
+  ) {
+    ({String text, Element source})? first;
+    ({String text, Element source})? worded;
+    void visit(Element child) {
+      if (worded != null) return;
+      final w = child.widget;
+      if (_isLabelBoundary(w) || layers.hidesScope(child)) return;
+      final own = _widgetOwnText(w);
+      if (own != null) {
+        // A text the user cannot see is no label; its subtree is the same
+        // text's render machinery, so the search moves on to its siblings.
+        if (_isOnScreen(child, screen) && !layers.hides(child)) {
+          final found = (text: own, source: child);
+          first ??= found;
+          if (_hasLetter(own)) worded = found;
+        }
+        return;
+      }
+      child.visitChildren(visit);
+    }
+
+    element.visitChildren(visit);
+    return worded ?? first;
+  }
+
+  /// Whether [s] contains a letter in any script — what makes a text a
+  /// name rather than a count, a price or an icon glyph.
+  bool _hasLetter(String s) => s.contains(RegExp(r'\p{L}', unicode: true));
+
+  /// Whether a label search ([_subtreeLabel], [semanticsOf]) must stop at
+  /// [widget]: a scroll view or a navigator holds content of its own (rows,
+  /// pages), never the label of a control wrapped around it. A field's
+  /// value is read off its [EditableText] above the field's own
+  /// [Scrollable], so a field keeps its text.
+  bool _isLabelBoundary(Widget widget) =>
+      widget is Scrollable || widget is Navigator || widget is Overlay;
 
   /// Whether [widget] reads as a button: a Material button, or an
   /// `InkWell`/`GestureDetector` acting as one.
@@ -2302,13 +2433,17 @@ class TreeWalker {
   /// with a sibling [labelRect]: smallest vertical gap where the field
   /// starts at/below the label, tie-broken by horizontal center
   /// distance, within ~one form row. Returns null if nothing qualifies.
-  Element? _nearestFieldElement(ElementRect labelRect) {
+  /// A field on a route [layers] hides never qualifies: a page underneath
+  /// can hold a field at the very same place.
+  Element? _nearestFieldElement(ElementRect labelRect, _RouteLayers layers) {
     final screen = _screenSize;
     final candidates = <(ElementRect, Element)>[];
 
     void walk(Element element) {
       final w = element.widget;
-      if (w is EditableText && _isOnScreen(element, screen)) {
+      if (w is EditableText &&
+          _isOnScreen(element, screen) &&
+          !layers.hides(element)) {
         final r = _rectOf(element);
         if (r != null) candidates.add((r, element));
       }
@@ -3070,6 +3205,10 @@ final class StateNotAControl extends StateTarget {
 enum TapRefusal {
   /// The target has no laid-out, on-screen geometry.
   notLaidOut,
+
+  /// The target is laid out but wholly outside the screen, or clipped away
+  /// by the view it scrolls in (a page of a `PageView` that is not showing).
+  offScreen,
 
   /// Nothing but the view receives pointers at the target: a route
   /// transition is in progress (every route scope ignores pointers).

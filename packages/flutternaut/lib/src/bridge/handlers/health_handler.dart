@@ -38,7 +38,15 @@ class HealthHandler {
   /// only visible text (they searched the whole tree). Every `nth` — taps,
   /// waits, state routes and the dump's `text_nth`/`semantics_nth` — indexes
   /// one list: the visible matches in reading order.
-  static const String protocolVersion = '1.5.0';
+  ///
+  /// 1.5.1 — a button's `/screen` label is visible text only (never a page
+  /// kept underneath, an offstage tab, or past a scroll view / navigator),
+  /// words beat a count badge or glyph, and the node reports `label_rect`
+  /// (the rect of the text it was read off — what `near` anchors on);
+  /// movement gestures leave the touch slop before awaiting a frame (a
+  /// scroll is never a long press); a wholly off-screen tap target is
+  /// refused as off screen; `type`/`clear` by label skip hidden pages.
+  static const String protocolVersion = '1.5.1';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

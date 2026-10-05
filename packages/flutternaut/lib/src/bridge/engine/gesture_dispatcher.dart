@@ -701,6 +701,8 @@ class GestureDispatcher {
         throw ActionFailure(switch (refusal) {
           TapRefusal.notLaidOut =>
             '$desc exists but has no on-screen geometry (not laid out).',
+          TapRefusal.offScreen => '$desc is present$at but not on screen: '
+              'it is $blocker.',
           TapRefusal.nothingHit =>
             '$desc is present$at but no widget receives pointers there right '
                 'now: a route transition is in progress and Flutter ignores '
@@ -854,6 +856,16 @@ class GestureDispatcher {
   ///
   /// All movement gestures share the same structure: begin → move N steps → end.
   /// Only the [steps], [stepIntervalMs], and [settleFrames] differ.
+  ///
+  /// A finger moves as it lands. Until the pointer has left the touch slop
+  /// ([kTouchSlop]), a press-and-hold recognizer under it — an
+  /// `onLongPress` wrapped around the whole app by a debug overlay such as
+  /// `requests_inspector` — is still in the running, and its deadline is a
+  /// real-time timer. A frame awaited in that window that took longer than
+  /// [kLongPressTimeout] turned a scroll into a long press: the overlay
+  /// opened and the list never moved. So the down and the moves that carry
+  /// the pointer past the slop go out together, before anything is awaited
+  /// ([_movesToLeaveSlop]); frames are pumped only after that.
   Future<void> _dispatchMovement(
     Offset start,
     Offset delta, {
@@ -862,22 +874,33 @@ class GestureDispatcher {
     int settleFrames = 5,
   }) async {
     final session = _beginPointer(start);
-    await _pumpFrames();
 
     final stepDelta = delta / steps.toDouble();
+    final leaveSlop = _movesToLeaveSlop(stepDelta.distance, steps);
     for (var i = 1; i <= steps; i++) {
       session.moveTo(
         start + delta * (i / steps),
         stepDelta,
         Duration(milliseconds: stepIntervalMs * i),
       );
-      if (i % 3 == 0) await _pumpFrames();
+      if (i >= leaveSlop && i % 3 == 0) await _pumpFrames();
     }
     await _pumpFrames();
 
     await session.end(start + delta,
         timeOffset: Duration(milliseconds: stepIntervalMs * (steps + 1)));
     await _pumpFrames(count: settleFrames);
+  }
+
+  /// How many moves of [stepLength] logical px carry a pointer strictly past
+  /// [kTouchSlop] — the distance at which a recognizer still waiting to win
+  /// (a long press, a tap) rejects the pointer — capped at [steps]. A
+  /// gesture shorter than the slop, or one that does not move, is all of its
+  /// steps.
+  static int _movesToLeaveSlop(double stepLength, int steps) {
+    if (stepLength <= 0) return steps;
+    final moves = (kTouchSlop / stepLength).floor() + 1;
+    return moves < steps ? moves : steps;
   }
 
   Future<void> _pumpFrames({int count = 1}) async {

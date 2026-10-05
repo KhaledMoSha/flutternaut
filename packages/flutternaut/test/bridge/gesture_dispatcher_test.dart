@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -398,6 +399,131 @@ void main() {
         throwsA(isA<ActionFailure>()),
       );
     });
+
+    // The partner app: an edit-menu page with a "Name in English" field
+    // stays mounted under the new-category page, whose form has the same
+    // label and field at the same place. The page underneath comes first in
+    // tree order and keeps its last geometry; resolving its label typed into
+    // — or, gated, refused as occluded — a field the user cannot see.
+    testWidgets(
+        'a page kept underneath with the same form does not take the label',
+        (tester) async {
+      final under = TextEditingController();
+      final top = TextEditingController();
+      addTearDown(under.dispose);
+      addTearDown(top.dispose);
+      final nav = GlobalKey<NavigatorState>();
+      Widget form(TextEditingController controller) => Scaffold(
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Name in English'),
+                TextField(controller: controller),
+              ],
+            ),
+          );
+
+      await tester.pumpWidget(
+          MaterialApp(navigatorKey: nav, home: form(under)));
+      // An opaque page with no transition (as the partner app's router
+      // pushes it): the page underneath keeps its place and full opacity.
+      nav.currentState!.push(PageRouteBuilder<void>(
+        pageBuilder: (_, __, ___) => form(top),
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+      ));
+      await tester.pumpAndSettle();
+
+      final ok = await _pumpAndAwait(
+        tester,
+        () => dispatcher.typeText(text: 'Name in English', input: 'Cat'),
+      );
+
+      expect(ok, isTrue);
+      expect(top.text, 'Cat');
+      expect(under.text, isEmpty,
+          reason: 'the page underneath is not on screen for the user');
+    });
+
+    testWidgets('a label in an inactive tab (Offstage) does not take the label',
+        (tester) async {
+      final hiddenTab = TextEditingController();
+      final shown = TextEditingController();
+      addTearDown(hiddenTab.dispose);
+      addTearDown(shown.dispose);
+      await tester.pumpWidget(_app(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Offstage(
+              child: Column(children: [
+                const Text('Name'),
+                TextField(controller: hiddenTab),
+              ]),
+            ),
+            const Text('Name'),
+            TextField(controller: shown),
+          ],
+        ),
+      ));
+
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.typeText(text: 'Name', input: 'x'),
+      );
+
+      expect(shown.text, 'x');
+      expect(hiddenTab.text, isEmpty);
+    });
+
+    testWidgets('a filled field is still found by its faded-out hint',
+        (tester) async {
+      final email = TextEditingController(text: 'old@b.c');
+      addTearDown(email.dispose);
+      await tester.pumpWidget(_app(
+        TextField(
+          controller: email,
+          decoration: const InputDecoration(hintText: 'Email'),
+        ),
+      ));
+
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.clearText(text: 'Email'),
+      );
+
+      expect(email.text, isEmpty);
+    });
+
+    // Decided 2026-10-05: two fields on the visible page under the same
+    // label keep resolving to the first in tree order (no new refusal).
+    testWidgets('two visible fields under the same label: the first is used',
+        (tester) async {
+      final first = TextEditingController();
+      final second = TextEditingController();
+      addTearDown(first.dispose);
+      addTearDown(second.dispose);
+      await tester.pumpWidget(_app(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Name'),
+            TextField(controller: first),
+            const SizedBox(height: 24),
+            const Text('Name'),
+            TextField(controller: second),
+          ],
+        ),
+      ));
+
+      await _pumpAndAwait(
+        tester,
+        () => dispatcher.typeText(text: 'Name', input: 'x'),
+      );
+
+      expect(first.text, 'x');
+      expect(second.text, isEmpty);
+    });
   });
 
   group('typeText input pipeline', () {
@@ -609,6 +735,97 @@ void main() {
         dispatcher.longPress(key: 'missing'),
         throwsA(isA<ActionFailure>()),
       );
+    });
+  });
+
+  group('a movement gesture is never a press-and-hold', () {
+    // requests_inspector wraps the whole app in GestureDetector(onLongPress:).
+    // Its long-press deadline is a real timer started at pointer down; a
+    // swipe that awaited a frame before moving, on an app whose next frame
+    // took longer than kLongPressTimeout, opened the overlay instead of
+    // scrolling.
+    testWidgets(
+        'a swipe whose first frame stalls past the long-press timeout '
+        'scrolls the list and never long-presses', (tester) async {
+      var longPressed = false;
+      final list = ScrollController();
+      addTearDown(list.dispose);
+      await tester.pumpWidget(MaterialApp(
+        home: GestureDetector(
+          onLongPress: () => longPressed = true,
+          child: Scaffold(
+            body: ListView(
+              controller: list,
+              children: [
+                for (var i = 0; i < 60; i++)
+                  SizedBox(height: 60, child: Text('Row $i')),
+              ],
+            ),
+          ),
+        ),
+      ));
+
+      final center = tester.getCenter(find.byType(ListView));
+      final done = Completer<void>();
+      dispatcher.swipeAt(center, 'up', 300).then(done.complete);
+      // The app's next frame takes longer than a long press: fake time runs
+      // past kLongPressTimeout before the first frame is produced.
+      await tester.pump(kLongPressTimeout + const Duration(milliseconds: 100));
+      for (var i = 0; i < 100 && !done.isCompleted; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(done.isCompleted, isTrue);
+
+      expect(longPressed, isFalse,
+          reason: 'the pointer left the touch slop before any frame was '
+              'awaited');
+      expect(list.offset, greaterThan(0), reason: 'the list must scroll');
+    });
+  });
+
+  group('a tap target on a page that is not showing', () {
+    // A debug overlay's hidden page (requests_inspector: the second page of
+    // a NeverScrollable PageView) can stay laid out beside the screen. A
+    // tap whose only match lives there must say it is off screen — not
+    // blame a route transition that is not running and send the reader to
+    // wait_idle.
+    testWidgets('is refused as off screen, not as a route transition',
+        (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(MaterialApp(
+        home: PageView(
+          physics: const NeverScrollableScrollPhysics(),
+          // Keeps the neighbouring page built, beside the screen.
+          allowImplicitScrolling: true,
+          children: [
+            const Scaffold(body: Center(child: Text('app'))),
+            Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => tapped = true,
+                  child: const Text('Close'),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ));
+      expect(find.text('Close', skipOffstage: false), findsOneWidget,
+          reason: 'the hidden page must be built for this check');
+
+      await expectLater(
+        dispatcher.tap(text: 'Close'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+            contains('not on screen'),
+            contains('800x600 screen'),
+            isNot(contains('route transition')),
+          ),
+        )),
+      );
+      expect(tapped, isFalse);
     });
   });
 
