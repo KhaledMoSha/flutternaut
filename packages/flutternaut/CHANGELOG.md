@@ -1,5 +1,6 @@
 ## Unreleased
 
+* `/swipe` takes an optional `fling` (default `true`, the old behaviour). With `"fling": false` the finger stops before it lifts, so a list moves about the requested distance and stops; before, a 300 px swipe released at speed and the list flung on (about 890 px on a 72 px-row list), so a search for a row just below the fold could skip it. Bridge protocol 1.6.1.
 * The bridge works in **debug, profile and release** builds. The README's setup snippet is now unconditional: call `await FlutternautBridge.ensureInitialized();` and remove the call (or pass `enabled: false`) from builds you publish to a store.
 * **The bridge now listens on the device's loopback interface (`127.0.0.1`) instead of every interface.** The engine reaches it the same way as before (`adb forward`, the Mac's loopback for iOS simulators, `iproxy` for iPhones), but nothing on the device's network can. Pass `ensureInitialized(bindAddress: InternetAddress.anyIPv4)` to drive a device over Wi-Fi. New: `FlutternautBridge.instance.address`.
 * An Android release build without the `INTERNET` permission can't open the bridge's socket. `ensureInitialized` now says exactly that, naming the manifest line to add. Before, it blamed another app on the port.
@@ -34,6 +35,10 @@
 * A tap target wholly outside the screen, or clipped away by its scroll view, is refused as off screen ("it is on a page or part of a list that is not showing"), not as a route transition, when no transition is running.
 * `/type` and `/clear_text` by label skip labels and fields on a page kept underneath or in an offstage tab. A form pushed over a page with the same form used to type into — or be refused as covering — the hidden page's field.
 * Bridge protocol 1.5.1.
+* A `semantics` locator also matches a `Semantics(identifier:)` — exactly, then case-insensitively, like a label — on every locator route (`/tap`, `/long_press`, the visibility, state and lookup routes). `Semantics(identifier: 'btn:nav:search', child: GestureDetector(…))` is tapped by `semantics: "btn:nav:search"`; the tap lands on the control the `Semantics` wraps.
+* A `/screen` node carries `semantics_id` when a `Semantics` with the same bounds names it (the node's own, or one a few levels up, through a `MergeSemantics`). An identifier on a section around several controls (`section:nav:bar` on a bar) names none of them. A repeated identifier adds `semantics_id_nth`/`semantics_id_matches`, the `nth` a `semantics` locator needs.
+* `near` searches through containers. An unlabeled tap surface at least half the screen tall (an app-wide `GestureDetector` such as `requests_inspector`'s long-press layer, a keyboard-dismiss wrapper) or one with readable text centered inside it (a tile) is neither a candidate nor a stop: the icon buttons inside it are found. Before, the first unlabeled control from the root hid every control under it, so an app-wide wrapper left `near` with nothing.
+* Bridge protocol 1.6.0.
 
 ## 0.0.6 — 2026-04-10
 

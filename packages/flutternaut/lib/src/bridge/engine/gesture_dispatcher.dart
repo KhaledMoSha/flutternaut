@@ -26,7 +26,7 @@ class GestureDispatcher {
   // ---------------------------------------------------------------------------
 
   /// Taps a widget found by [key], [text] or [semantics] (accessibility
-  /// label). When several visible widgets match, [nth] picks one in
+  /// label or `Semantics.identifier`). When several visible widgets match, [nth] picks one in
   /// reading order (0-based, rows top→bottom then left→right).
   ///
   /// Throws [ActionFailure] — never silently fails — when the target is
@@ -331,30 +331,46 @@ class GestureDispatcher {
   }
 
   /// Swipes a widget found by [key] or [text] in the given [direction].
+  /// With [fling] false the pointer stops before it lifts, so a scroll view
+  /// moves about [distance] and no further (see [_dispatchMovement]).
   Future<bool> swipe({
     String? key,
     String? text,
     required String direction,
     double distance = 300,
+    bool fling = true,
   }) async {
     final center = _centerOf(_resolve(key: key, text: text));
     if (center == null) return false;
 
-    await swipeAt(center, direction, distance);
+    await swipeAt(center, direction, distance, fling: fling);
     return true;
   }
 
   /// Swipes by [distance] in [direction] starting from [center]. Shared by
   /// the element-targeted [swipe] and the auto-resolved [swipeAuto].
-  Future<void> swipeAt(Offset center, String direction, double distance) {
-    return _dispatchMovement(center, _directionToDelta(direction, distance));
+  Future<void> swipeAt(
+    Offset center,
+    String direction,
+    double distance, {
+    bool fling = true,
+  }) {
+    return _dispatchMovement(
+      center,
+      _directionToDelta(direction, distance),
+      fling: fling,
+    );
   }
 
   /// Swipes the single on-screen [Scrollable] whose axis matches
   /// [direction], for a screen-level scroll when no scroll container is
   /// specified. Throws [ActionFailure] if none or more than one match
   /// (see [resolveScrollable]).
-  Future<bool> swipeAuto(String direction, double distance) async {
+  Future<bool> swipeAuto(
+    String direction,
+    double distance, {
+    bool fling = true,
+  }) async {
     final scrollable = resolveScrollable(direction);
     final center = walker.centerOfElement(scrollable);
     if (center == null) {
@@ -362,7 +378,7 @@ class GestureDispatcher {
         'The scrollable to scroll "$direction" has no on-screen geometry.',
       );
     }
-    await swipeAt(center, direction, distance);
+    await swipeAt(center, direction, distance, fling: fling);
     return true;
   }
 
@@ -374,8 +390,9 @@ class GestureDispatcher {
   Future<bool> swipeAtIndex(
     int index,
     String direction,
-    double distance,
-  ) async {
+    double distance, {
+    bool fling = true,
+  }) async {
     final axis = _axisForDirection(direction);
     final axisName = axis == Axis.vertical ? 'vertical' : 'horizontal';
     final matches = walker.findVisibleScrollables(axis);
@@ -392,7 +409,7 @@ class GestureDispatcher {
         'geometry.',
       );
     }
-    await swipeAt(center, direction, distance);
+    await swipeAt(center, direction, distance, fling: fling);
     return true;
   }
 
@@ -866,12 +883,24 @@ class GestureDispatcher {
   /// opened and the list never moved. So the down and the moves that carry
   /// the pointer past the slop go out together, before anything is awaited
   /// ([_movesToLeaveSlop]); frames are pumped only after that.
+  ///
+  /// With [fling] false the pointer stops before it lifts: [_holdGapMs]
+  /// after the last move (in the gesture's synthetic time) it sends
+  /// [_holdMoves] moves at the end position, [_holdIntervalMs] apart, then
+  /// lifts. The gap is over `kAssumePointerMoveStoppedMilliseconds` (40 ms),
+  /// so Flutter's velocity tracker stops reading back at it and estimates
+  /// from the still samples alone — zero — and the iOS tracker reads three
+  /// equal positions: a scroll view moves about the drag and does not fling
+  /// on. That is a
+  /// `scroll`: move this far, then stop. With [fling] true (a `swipe`: dismiss
+  /// a row, page a carousel) the pointer lifts while moving, as before.
   Future<void> _dispatchMovement(
     Offset start,
     Offset delta, {
     int steps = 30,
     int stepIntervalMs = 8,
     int settleFrames = 5,
+    bool fling = true,
   }) async {
     final session = _beginPointer(start);
 
@@ -887,10 +916,39 @@ class GestureDispatcher {
     }
     await _pumpFrames();
 
+    var liftMs = stepIntervalMs * (steps + 1);
+    if (!fling) {
+      final end = start + delta;
+      final lastMoveMs = stepIntervalMs * steps;
+      final holdStartMs = lastMoveMs + _holdGapMs;
+      for (var i = 0; i < _holdMoves; i++) {
+        session.moveTo(
+          end,
+          Offset.zero,
+          Duration(milliseconds: holdStartMs + _holdIntervalMs * i),
+        );
+      }
+      await _pumpFrames();
+      liftMs = holdStartMs + _holdIntervalMs * (_holdMoves - 1) + 10;
+    }
+
     await session.end(start + delta,
-        timeOffset: Duration(milliseconds: stepIntervalMs * (steps + 1)));
+        timeOffset: Duration(milliseconds: liftMs));
     await _pumpFrames(count: settleFrames);
   }
+
+  /// How many stationary moves a non-fling movement holds before lifting —
+  /// the velocity trackers' minimum sample count.
+  static const int _holdMoves = 3;
+
+  /// Synthetic time from the last move to the first stationary one: over
+  /// `kAssumePointerMoveStoppedMilliseconds` (40 ms), so the moving samples
+  /// are not part of the release velocity.
+  static const int _holdGapMs = 50;
+
+  /// Synthetic time between the stationary moves (under 40 ms, so they read
+  /// as one stop).
+  static const int _holdIntervalMs = 20;
 
   /// How many moves of [stepLength] logical px carry a pointer strictly past
   /// [kTouchSlop] — the distance at which a recognizer still waiting to win

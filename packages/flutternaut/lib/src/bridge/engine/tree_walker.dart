@@ -150,10 +150,91 @@ class TreeWalker {
   /// so the describing widget is typically 3–5 elements above the control.
   static const int _semanticsAncestorHops = 6;
 
+  /// The accessibility identifier a [Semantics] widget declares
+  /// (`Semantics(identifier: 'btn:nav:search')` — Flutter's
+  /// `resource-id` / `accessibilityIdentifier`), trimmed. Null for any
+  /// other widget and for an empty identifier. Like [ownSemanticsOf], this
+  /// is what the `semantics` locator matches.
+  static String? ownSemanticsIdOf(Widget widget) {
+    if (widget is! Semantics) return null;
+    final trimmed = widget.properties.identifier?.trim();
+    return (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+  }
+
+  /// The accessibility identifier to attach to a dump node as
+  /// `semantics_id`: the element's own ([ownSemanticsIdOf]), else the one a
+  /// close ancestor [Semantics] declares **for exactly this widget** — the
+  /// first ancestor with an identifier decides, and it counts only when its
+  /// rect equals the element's (within [_semanticsIdRectSlack] on x, y,
+  /// width and height). `Semantics(identifier:, child: GestureDetector(…))`
+  /// (with or without a `MergeSemantics` above it) names the detector;
+  /// `Semantics(identifier: 'section:…', child: Row(…))` around a bar names
+  /// none of the controls inside it.
+  ///
+  /// The walk stops, as [semanticsOf]'s does, at another control, a scroll
+  /// view or a text field, and after [_semanticsAncestorHops]. The subtree
+  /// is never searched: an identifier inside a control names whatever it
+  /// wraps there, not the control around it.
+  String? semanticsIdOf(Element element) {
+    final own = ownSemanticsIdOf(element.widget);
+    if (own != null) return own;
+    final rect = _rectOf(element);
+    if (rect == null) return null;
+
+    String? found;
+    var hops = 0;
+    element.visitAncestorElements((ancestor) {
+      final w = ancestor.widget;
+      if (_isButtonLike(w) || w is Scrollable || w is EditableText) {
+        return false;
+      }
+      final id = ownSemanticsIdOf(w);
+      if (id != null) {
+        final ancestorRect = _rectOf(ancestor);
+        if (ancestorRect != null && _sameRect(ancestorRect, rect)) found = id;
+        return false;
+      }
+      hops++;
+      return hops < _semanticsAncestorHops;
+    });
+    return found;
+  }
+
+  /// How far (logical px) two rects may differ on x, y, width and height
+  /// and still be one widget's bounds — a `Semantics` wrapper and the
+  /// control it wraps share them, up to rounding.
+  static const double _semanticsIdRectSlack = 0.5;
+
+  /// Whether [a] and [b] are the same bounds within
+  /// [_semanticsIdRectSlack].
+  static bool _sameRect(ElementRect a, ElementRect b) =>
+      (a.x - b.x).abs() <= _semanticsIdRectSlack &&
+      (a.y - b.y).abs() <= _semanticsIdRectSlack &&
+      (a.width - b.width).abs() <= _semanticsIdRectSlack &&
+      (a.height - b.height).abs() <= _semanticsIdRectSlack;
+
+  /// Whether [widget] is what a `semantics` locator [target] names: its own
+  /// accessibility label ([ownSemanticsOf]) or its own identifier
+  /// ([ownSemanticsIdOf]) equals [target] — exactly, or with [foldCase]
+  /// case-insensitively ([target] is then already lower-cased).
+  static bool _semanticsMatch(
+    Widget widget,
+    String target, {
+    required bool foldCase,
+  }) {
+    final label = ownSemanticsOf(widget);
+    final id = ownSemanticsIdOf(widget);
+    if (foldCase) {
+      return label?.toLowerCase() == target || id?.toLowerCase() == target;
+    }
+    return label == target || id == target;
+  }
+
   /// Finds the first element whose own accessibility label
-  /// ([ownSemanticsOf]) equals [label] exactly, else — so a test written
-  /// against a tooltip survives a capitalisation change — the first whose
-  /// label equals it case-insensitively.
+  /// ([ownSemanticsOf]) or identifier ([ownSemanticsIdOf]) equals [label]
+  /// exactly, else — so a test written against a tooltip survives a
+  /// capitalisation change — the first whose label or identifier equals it
+  /// case-insensitively.
   ElementInfo? findBySemantics(String label) {
     final el = findElementBySemantics(label);
     return el == null ? null : extractInfo(el);
@@ -162,26 +243,30 @@ class TreeWalker {
   /// The [Element] version of [findBySemantics].
   Element? findElementBySemantics(String label) {
     final exact = _findElementWhere(
-      (e) => ownSemanticsOf(e.widget) == label,
+      (e) => _semanticsMatch(e.widget, label, foldCase: false),
     );
     if (exact != null) return exact;
     final needle = label.toLowerCase();
     return _findElementWhere(
-      (e) => ownSemanticsOf(e.widget)?.toLowerCase() == needle,
+      (e) => _semanticsMatch(e.widget, needle, foldCase: true),
     );
   }
 
-  /// Every element whose own accessibility label equals [label]
-  /// (exact first; case-insensitive when nothing matches exactly). Used
-  /// by the tap/long-press confirm pipeline for ambiguity detection.
+  /// Every element whose own accessibility label or identifier equals
+  /// [label] (exact first; case-insensitive when nothing matches exactly).
+  /// Used by the tap/long-press confirm pipeline for ambiguity detection.
+  ///
+  /// A match on a `Semantics` wrapper is the wrapper itself: a tap at its
+  /// centre reaches the control it wraps (the wrapper's render object is on
+  /// the hit path), exactly as for a `Semantics(label:)` match.
   List<Element> findAllElementsBySemantics(String label) {
     final exact = _findAllElementsWhere(
-      (e) => ownSemanticsOf(e.widget) == label,
+      (e) => _semanticsMatch(e.widget, label, foldCase: false),
     );
     if (exact.isNotEmpty) return exact;
     final needle = label.toLowerCase();
     return _findAllElementsWhere(
-      (e) => ownSemanticsOf(e.widget)?.toLowerCase() == needle,
+      (e) => _semanticsMatch(e.widget, needle, foldCase: true),
     );
   }
 
@@ -475,9 +560,12 @@ class TreeWalker {
   ///   `enabled` on a dump node),
   /// - no [ValueKey] and no visible text in its subtree (truly unlabeled),
   /// - on screen and unobstructed (the dump's visibility gates),
-  /// - **outermost only**: a candidate's subtree is never searched for more
-  ///   candidates (an `_IconButton` wrapping an enabled `GestureDetector`
-  ///   counts once),
+  /// - not a **container** ([_isNearContainer]: a page wrapper, or a shell
+  ///   with readable text centered inside it) — a container is searched
+  ///   through, never counted,
+  /// - **outermost only** among the rest: a candidate's subtree is never
+  ///   searched for more candidates (an `_IconButton` wrapping an enabled
+  ///   `GestureDetector` counts once),
   /// - rect vertically overlaps [anchor]'s rect.
   List<Element> unlabeledInteractiveNear(Element anchor) {
     final anchorRect = _rectOf(anchor);
@@ -489,26 +577,46 @@ class TreeWalker {
     final candidates = <({ElementRect rect, Element el})>[];
 
     void visit(Element element) {
-      // The shell check (unlabeled + interactive + visible) both selects
-      // candidates and prunes: a shell's subtree is never searched again,
-      // so a wrapper and its inner gesture detector count once. A shell
-      // with readable text centered inside it is pruned but NOT a
-      // candidate — the catalog labels that control with the inner text
-      // (its labelIconButtons pass), so it is addressable without `near`.
+      // The shell check (unlabeled + interactive + visible) selects
+      // candidates and prunes: a candidate's subtree is never searched
+      // again, so a wrapper and its inner gesture detector count once. A
+      // container shell is neither a candidate nor a stop — an app-wide
+      // detector (`requests_inspector`'s long-press layer, a keyboard-dismiss
+      // wrapper around a page) or a tile the catalog labels with its inner
+      // text (its labelIconButtons pass): the controls inside it are searched.
       if (_isUnlabeledInteractiveShell(element, screen, layers)) {
         final rect = _rectOf(element);
-        if (rect != null &&
-            _yOverlaps(rect, anchorRect) &&
-            !_hasReadableTextCenteredInside(rect, screen)) {
-          candidates.add((rect: rect, el: element));
+        if (rect == null) return;
+        if (!_isNearContainer(element, rect, screen)) {
+          if (_yOverlaps(rect, anchorRect)) {
+            candidates.add((rect: rect, el: element));
+          }
+          return; // outermost-only: never descend into a candidate shell
         }
-        return; // outermost-only: never descend into a shell
       }
       element.visitChildren(visit);
     }
 
     root.visitChildren(visit);
     return _readingOrder(candidates).map((c) => c.el).toList();
+  }
+
+  /// Whether the `near` shell [element] (laid out at [rect]) is a container
+  /// rather than a control — the engine catalog's rule too, so a recorded
+  /// `nth` never drifts:
+  ///
+  ///  * a **page wrapper**: its visible rect (the dump node's `rect`) is at
+  ///    least half the [screen] tall. With the screen size unknown nothing
+  ///    is a page wrapper;
+  ///  * or readable text is centered inside [rect]
+  ///    ([_hasReadableTextCenteredInside]) — the catalog labels that
+  ///    control with the inner text, so it is addressable without `near`.
+  bool _isNearContainer(Element element, ElementRect rect, Size? screen) {
+    if (screen != null) {
+      final visible = _visibleRect(element, screen);
+      if (visible != null && visible.height >= screen.height / 2) return true;
+    }
+    return _hasReadableTextCenteredInside(rect, screen);
   }
 
   /// [elements] sorted in reading order — the same rows-then-columns rule
@@ -692,8 +800,8 @@ class TreeWalker {
   VisibilityResult checkTextContainsVisible(String substring, {int? nth}) =>
       checkTextMatchVisible(substring, TextMatch.contains, nth: nth);
 
-  /// Visibility of the widget(s) with accessibility label [label] (see
-  /// [findAllElementsBySemantics] and [checkTextVisible]).
+  /// Visibility of the widget(s) with accessibility label or identifier
+  /// [label] (see [findAllElementsBySemantics] and [checkTextVisible]).
   VisibilityResult checkVisibleBySemantics(String label, {int? nth}) {
     return _checkVisibility(
       findAllElementsBySemantics(label),
@@ -1631,6 +1739,8 @@ class TreeWalker {
           if (labelRect != null) node['label_rect'] = labelRect.toJson();
           final semantics = semanticsOf(element);
           if (semantics != null) node['semantics'] = semantics;
+          final semanticsId = semanticsIdOf(element);
+          if (semanticsId != null) node['semantics_id'] = semanticsId;
           final rect = _visibleRect(element, screen);
           if (rect != null) {
             node['rect'] = ElementRect(
@@ -1644,7 +1754,7 @@ class TreeWalker {
           final enabled = dumpState(element);
           if (enabled != null) node['enabled'] = enabled;
           if (info.checked != null) node['checked'] = info.checked;
-          nthIndex.annotate(element, node, nodeText, semantics);
+          nthIndex.annotate(element, node, nodeText, semantics, semanticsId);
           if (widget is Scrollable) {
             _applyScrollInfo(
               element,
@@ -3084,10 +3194,12 @@ class _RouteLayers {
 /// ([TreeWalker.visibleMatches]) — so a catalog ref resolves to exactly
 /// the widget it names even when its label repeats on screen.
 ///
-/// Emitted as `text_nth`/`text_matches` and `semantics_nth`/
-/// `semantics_matches`, only when the label has more than one visible
-/// match and the node is one of them. Candidate lists are computed once
-/// per label per dump.
+/// Emitted as `text_nth`/`text_matches`, `semantics_nth`/
+/// `semantics_matches` and `semantics_id_nth`/`semantics_id_matches`, only
+/// when the label has more than one visible match and the node is one of
+/// them. An identifier is a `semantics` locator target too, so its
+/// candidates are exactly what that locator resolves to. Candidate lists
+/// are computed once per label per dump.
 class _NthIndex {
   _NthIndex(this._walker);
 
@@ -3100,6 +3212,7 @@ class _NthIndex {
     Map<String, dynamic> out,
     String? text,
     String? semantics,
+    String? semanticsId,
   ) {
     if (text != null && text.isNotEmpty) {
       final candidates = _byText.putIfAbsent(text, () {
@@ -3109,13 +3222,20 @@ class _NthIndex {
       _emit(node, out, 'text', candidates);
     }
     if (semantics != null) {
-      final candidates = _bySemantics.putIfAbsent(semantics, () {
-        final matches = _walker.findAllElementsBySemantics(semantics);
-        return matches.length > 1 ? _walker.visibleMatches(matches) : const [];
-      });
-      _emit(node, out, 'semantics', candidates);
+      _emit(node, out, 'semantics', _semanticsCandidates(semantics));
+    }
+    if (semanticsId != null) {
+      _emit(node, out, 'semantics_id', _semanticsCandidates(semanticsId));
     }
   }
+
+  /// The visible matches of a `semantics` locator [target] (label or
+  /// identifier), or none when it matches at most one widget.
+  List<Element> _semanticsCandidates(String target) =>
+      _bySemantics.putIfAbsent(target, () {
+        final matches = _walker.findAllElementsBySemantics(target);
+        return matches.length > 1 ? _walker.visibleMatches(matches) : const [];
+      });
 
   void _emit(
     Element node,

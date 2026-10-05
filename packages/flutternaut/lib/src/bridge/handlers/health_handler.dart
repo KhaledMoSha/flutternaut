@@ -46,7 +46,21 @@ class HealthHandler {
   /// movement gestures leave the touch slop before awaiting a frame (a
   /// scroll is never a long press); a wholly off-screen tap target is
   /// refused as off screen; `type`/`clear` by label skip hidden pages.
-  static const String protocolVersion = '1.5.1';
+  ///
+  /// 1.6.0 — a `semantics` locator also matches a `Semantics.identifier`
+  /// (exact, then case-insensitive, like a label), on every locator route;
+  /// a `/screen` node carries `semantics_id` when a `Semantics` with the
+  /// same bounds names it (never one borrowed from a section around it),
+  /// with `semantics_id_nth`/`semantics_id_matches` when the identifier
+  /// repeats. `near` searches through containers — a page-tall detector
+  /// (an app-wide long-press layer) or a tile labelled by its inner text —
+  /// instead of stopping at the outermost unlabeled control.
+  ///
+  /// 1.6.1 — `/swipe` takes `fling` (default `true`): with `false` the
+  /// pointer stops before it lifts, so a scroll view moves about `distance`
+  /// and does not fling on (the engine's `scroll` and `scroll_until_visible`
+  /// send it; its `swipe` keeps the fling).
+  static const String protocolVersion = '1.6.1';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

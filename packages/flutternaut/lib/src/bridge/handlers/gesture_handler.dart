@@ -35,10 +35,10 @@ class GestureHandler {
 
   /// Taps an element located by `key`, `text` or `semantics` (an
   /// accessibility label: `Icon.semanticLabel`, `IconButton.tooltip`,
-  /// `Tooltip.message`, `Semantics.label`), or — for icon-only controls
-  /// with none of those — by `near` + `nth`: the nth unlabeled
-  /// interactive control (left-to-right) in the row of the unique
-  /// on-screen text `near`.
+  /// `Tooltip.message`, `Semantics.label` — or a `Semantics.identifier`),
+  /// or — for icon-only controls with none of those — by `near` + `nth`:
+  /// the nth unlabeled interactive control (left-to-right) in the row of
+  /// the unique on-screen text `near`.
   ///
   /// `match` (text targeting only): `"exact"` (default) requires the
   /// visible text to equal `text`; `"contains"` matches any widget
@@ -248,6 +248,7 @@ class GestureHandler {
           text: req.string('text'),
           direction: direction,
           distance: req.number('distance', defaultValue: 300),
+          fling: req.boolean('fling', defaultValue: true),
         ),
       );
       return ActionResult(
@@ -269,6 +270,7 @@ class GestureHandler {
           scrollIndex,
           direction,
           req.number('distance', defaultValue: 300),
+          fling: req.boolean('fling', defaultValue: true),
         ),
       );
       return ActionResult(
@@ -294,6 +296,7 @@ class GestureHandler {
         () => _gesture.swipeAuto(
           direction,
           req.number('distance', defaultValue: 300),
+          fling: req.boolean('fling', defaultValue: true),
         ),
       );
       return ActionResult(

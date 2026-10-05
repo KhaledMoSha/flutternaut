@@ -423,8 +423,8 @@ void main() {
             ),
           );
 
-      await tester.pumpWidget(
-          MaterialApp(navigatorKey: nav, home: form(under)));
+      await tester
+          .pumpWidget(MaterialApp(navigatorKey: nav, home: form(under)));
       // An opaque page with no transition (as the partner app's router
       // pushes it): the page underneath keeps its place and full opacity.
       nav.currentState!.push(PageRouteBuilder<void>(
@@ -780,6 +780,78 @@ void main() {
           reason: 'the pointer left the touch slop before any frame was '
               'awaited');
       expect(list.offset, greaterThan(0), reason: 'the list must scroll');
+    });
+  });
+
+  group('swipe with and without fling (KI-4)', () {
+    // A scroll must move about its distance and stop: released at speed, a
+    // 300 px swipe flung a 72 px-row list ~890 px and scroll_until_visible
+    // skipped the row just below the fold.
+    // Frames at a device's pace: a slower pump (the 50 ms of _pumpAndAwait)
+    // lets Flutter's velocity tracker see the pointer as stopped by wall
+    // clock before it lifts, and nothing would ever fling.
+    Future<void> runAtFrameRate(
+        WidgetTester tester, Future<void> Function() work) async {
+      var done = false;
+      work().then((_) => done = true);
+      for (var i = 0; i < 400 && !done; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(done, isTrue);
+      await tester.pumpAndSettle();
+    }
+
+    Future<ScrollController> pumpList(WidgetTester tester) async {
+      final list = ScrollController();
+      addTearDown(list.dispose);
+      await tester.pumpWidget(_app(ListView(
+        controller: list,
+        children: [
+          for (var i = 0; i < 200; i++)
+            SizedBox(height: 60, child: Text('Row $i')),
+        ],
+      )));
+      return list;
+    }
+
+    testWidgets('fling: false moves about the distance and stops',
+        (tester) async {
+      final list = await pumpList(tester);
+      final center = tester.getCenter(find.byType(ListView));
+      await runAtFrameRate(
+          tester, () => dispatcher.swipeAt(center, 'up', 300, fling: false));
+      // The drag starts once the pointer leaves the touch slop, so the
+      // list moves the distance less that — and nothing more.
+      expect(list.offset, greaterThanOrEqualTo(300 - 2 * kTouchSlop));
+      expect(list.offset, lessThanOrEqualTo(301));
+    },
+        variant: const TargetPlatformVariant(
+            {TargetPlatform.android, TargetPlatform.iOS}));
+
+    testWidgets('fling: true (a swipe) still flings on', (tester) async {
+      final list = await pumpList(tester);
+      final center = tester.getCenter(find.byType(ListView));
+      await runAtFrameRate(tester, () => dispatcher.swipeAt(center, 'up', 300));
+      expect(list.offset, greaterThan(400));
+    },
+        variant: const TargetPlatformVariant(
+            {TargetPlatform.android, TargetPlatform.iOS}));
+
+    testWidgets('swipeAtIndex and swipeAuto pass fling: false through',
+        (tester) async {
+      final list = await pumpList(tester);
+      await runAtFrameRate(
+          tester,
+          () =>
+              dispatcher.swipeAtIndex(0, 'up', 300, fling: false).then((_) {}));
+      final afterIndexed = list.offset;
+      expect(afterIndexed, greaterThanOrEqualTo(300 - 2 * kTouchSlop));
+      expect(afterIndexed, lessThanOrEqualTo(301));
+      await runAtFrameRate(tester,
+          () => dispatcher.swipeAuto('up', 300, fling: false).then((_) {}));
+      expect(list.offset - afterIndexed,
+          greaterThanOrEqualTo(300 - 2 * kTouchSlop));
+      expect(list.offset - afterIndexed, lessThanOrEqualTo(301));
     });
   });
 
