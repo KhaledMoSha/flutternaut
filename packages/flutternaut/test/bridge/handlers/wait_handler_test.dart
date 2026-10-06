@@ -63,8 +63,12 @@ void main() {
       final walker = TreeWalker();
       final runner = MainThreadRunner();
       router = BridgeRouter(log: (_) {});
-      HealthHandler(walker: walker, runner: runner, boundPort: () => 8500)
-          .register(router);
+      HealthHandler(
+        walker: walker,
+        runner: runner,
+        boundPort: () => 8500,
+        app: null,
+      ).register(router);
       WaitHandler(walker: walker, runner: runner).register(router);
     });
 

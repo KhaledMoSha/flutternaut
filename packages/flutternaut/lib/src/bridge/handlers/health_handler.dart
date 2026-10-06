@@ -60,7 +60,23 @@ class HealthHandler {
   /// pointer stops before it lifts, so a scroll view moves about `distance`
   /// and does not fling on (the engine's `scroll` and `scroll_until_visible`
   /// send it; its `swipe` keeps the fling).
-  static const String protocolVersion = '1.6.1';
+  ///
+  /// 1.7.0 — the scrollables `/screen` numbers (`scrollIndex`), `/swipe`
+  /// resolves by `scrollIndex` and the direction-only auto-pick chooses
+  /// from are exactly the dump's scrollable nodes: a list on a route hidden
+  /// behind a page, dialog, sheet or menu, on a closing route, or covered
+  /// at every point takes no number and is no candidate. A `scrollIndex`
+  /// recorded against an older bridge can shift, only down. A scroll
+  /// gesture starts at a visible point of the list that takes the pointer
+  /// (refused when there is none), and the none-visible error names what
+  /// may be in the way instead of suggesting a key. A layer covers a widget
+  /// only where it paints, so widgets under a page-wide tap layer that
+  /// draws a banner elsewhere are visible. A request may name the app it is
+  /// meant for in the `X-Flutternaut-App` header (the `app` of `/health`);
+  /// the bridge of another app refuses it with 409 and runs nothing
+  /// (`/health` always answers), and every response names the app that
+  /// answered in the same header.
+  static const String protocolVersion = '1.7.0';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;
@@ -75,20 +91,24 @@ class HealthHandler {
   /// the new app never bound the port — an older app still holds it.
   final String _instanceId = _randomId();
 
-  /// Which app this bridge runs in (see [readAppIdentity]).
-  final String? _app = readAppIdentity();
+  /// Which app this bridge runs in (see [readAppIdentity]); null when the
+  /// platform does not say.
+  final String? _app;
 
   /// [boundPort] reports the port the owning server is bound to (null when
   /// it is not bound); [environment] is read once, here, for the simulator
-  /// UDID.
+  /// UDID; [app] is the app this bridge runs in — the same value the router
+  /// compares a request's `X-Flutternaut-App` with.
   HealthHandler({
     required TreeWalker walker,
     required MainThreadRunner runner,
     required int? Function() boundPort,
+    required String? app,
     EnvironmentReader environment = readProcessEnvironment,
   })  : _walker = walker,
         _runner = runner,
         _boundPort = boundPort,
+        _app = app,
         _deviceId = readSimulatorUdid(environment);
 
   static String _randomId() {

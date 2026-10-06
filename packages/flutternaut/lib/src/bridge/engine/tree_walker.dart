@@ -1018,25 +1018,44 @@ class TreeWalker {
   /// The visible text of [element] (its own or first descendant), or null.
   String? textOfElement(Element element) => extractText(element);
 
-  /// Every on-screen [Scrollable] whose scroll [axis] matches, used to
-  /// auto-target a screen-level scroll when no explicit scroll container
-  /// is given. Recurses through matches so nested scrollables are also
+  /// Every on-screen [Scrollable] whose scroll [axis] matches, in
+  /// element-tree DFS order: the `/screen` dump's `scrollIndex`, the
+  /// `/swipe` `scrollIndex` and the direction-only auto-pick all read this
+  /// one list. Recurses through matches so nested scrollables are also
   /// found — that lets the caller detect genuine same-axis ambiguity.
+  ///
+  /// A scrollable counts exactly when the dump emits it as a node. Only
+  /// routes the user can see count, by the dump walk's own rule: the
+  /// subtree of a route hidden behind a page, dialog, sheet or menu, or of
+  /// a route that is closing, is pruned. Without it a list on a page kept
+  /// underneath took a number (the visible list read `scrollIndex 3` while
+  /// 0–2 never appeared) and an equal-size twin made the auto-pick
+  /// ambiguous, depending on navigation history. A scrollable covered at
+  /// every sample point ([_coverage]) — the page coming back while the
+  /// closing page still slides over it — is not shown either, and a swipe
+  /// at its centre would land on the cover.
   ///
   /// A single `ListView`/`CustomScrollView` builds exactly one
   /// `Scrollable`, so list internals don't inflate the count; a
   /// `NestedScrollView` legitimately yields more than one.
-  List<Element> findVisibleScrollables(Axis axis) {
+  List<Element> findVisibleScrollables(Axis axis) =>
+      _visibleScrollables(axis, _routeLayers());
+
+  /// [findVisibleScrollables] against an already-taken [layers] snapshot,
+  /// so the dump numbers its scrollables by the same route state it walks.
+  List<Element> _visibleScrollables(Axis axis, _RouteLayers layers) {
     final root = WidgetsBinding.instance.rootElement;
     if (root == null) return const [];
 
     final screen = _screenSize;
     final matches = <Element>[];
     void visit(Element element) {
+      if (layers.hidesScope(element)) return;
       final widget = element.widget;
       if (widget is Scrollable &&
           axisDirectionToAxis(widget.axisDirection) == axis &&
-          _isOnScreen(element, screen)) {
+          _isOnScreen(element, screen) &&
+          _coverage(element, screen) != _Coverage.covered) {
         matches.add(element);
       }
       element.visitChildren(visit);
@@ -1044,6 +1063,60 @@ class TreeWalker {
 
     root.visitChildren(visit);
     return matches;
+  }
+
+  /// Where a scroll gesture on [scrollable] can start right now: the first
+  /// of its [_samplePoints] (the centre of its visible part first) where
+  /// the pointer reaches it — its drag recognizer is on the hit path — and
+  /// nothing painted covers it ([_pointClear]). Counting a scrollable
+  /// ([findVisibleScrollables]) only says some of it is in view; its
+  /// unclipped centre can be off screen (a page sliding in), under a card,
+  /// or under the page still sliding away, and a swipe there moves nothing.
+  ///
+  /// `point` is null when no sample point qualifies; `blocker` then says
+  /// what is in the way at the centre of the visible part.
+  ({Offset? point, String blocker}) scrollStartOf(Element scrollable) {
+    final target = scrollable.renderObject;
+    final points = _samplePoints(scrollable);
+    if (target == null || points.isEmpty) {
+      return (point: null, blocker: 'no part of it is on screen');
+    }
+    final root = _rootRenderObject(target);
+    if (root is! RenderView) {
+      return (point: null, blocker: 'it is not attached to a view');
+    }
+    for (final point in points) {
+      if (_pathReaches(_hitTest(root, point), target) &&
+          _pointClear(target, root, point)) {
+        return (point: point, blocker: '');
+      }
+    }
+    return (point: null, blocker: _scrollBlocker(target, root, points.first));
+  }
+
+  /// What keeps a scroll gesture at [point] from [target] (see
+  /// [scrollStartOf]).
+  String _scrollBlocker(RenderObject target, RenderView root, Offset point) {
+    if (isTransitioning) {
+      return 'a route transition is running, and pointers are ignored until '
+          'it ends (wait_idle waits for it)';
+    }
+    final hit = _hitTest(root, point);
+    final top = _frontmost(hit);
+    if (top == null || identical(top, root)) {
+      return 'nothing receives the pointer there';
+    }
+    if (_pathReaches(hit, target)) {
+      return 'it is covered there by ${_describeHit(top)}';
+    }
+    if (_isRenderAncestorOrSelf(top, target)) {
+      final blocker = _silentClaimer(top, point, stopAt: target) ??
+          _ignoringBetween(top, target);
+      if (blocker != null) {
+        return 'the pointer is swallowed by ${_describeBlocker(blocker)}';
+      }
+    }
+    return 'the pointer is taken by ${_describeHit(top)}';
   }
 
   /// Whether a pointer at [point] (global/view coordinates) would reach
@@ -1686,12 +1759,16 @@ class TreeWalker {
     final elements = <Map<String, dynamic>>[];
 
     // Per-axis scrollable lists share [findVisibleScrollables]' filter and
-    // DFS order with the `/swipe` `scrollIndex` resolution, so the index a
-    // consumer reads from the dump resolves to the same scrollable when it
-    // scrolls — the two can never disagree.
-    final verticalScrollables = findVisibleScrollables(Axis.vertical);
-    final horizontalScrollables = findVisibleScrollables(Axis.horizontal);
+    // DFS order with the `/swipe` `scrollIndex` resolution and the
+    // direction-only auto-pick, so the index a consumer reads from the dump
+    // resolves to the same scrollable when it scrolls — they can never
+    // disagree. That filter prunes hidden routes exactly as this walk does
+    // ([_RouteLayers.hidesScope] below, one snapshot for both) and drops a
+    // scrollable covered at every point as the node gate below does, so no
+    // list takes a number the dump never shows.
     final layers = _routeLayers();
+    final verticalScrollables = _visibleScrollables(Axis.vertical, layers);
+    final horizontalScrollables = _visibleScrollables(Axis.horizontal, layers);
     final nthIndex = _NthIndex(this);
 
     // [parentLabel] is the text of the nearest already-emitted ancestor. A
@@ -1792,10 +1869,11 @@ class TreeWalker {
 
   /// Enriches a dump [node] for a [Scrollable] element: marks it
   /// `scrollable`, reports its axis, scroll metrics, and `scrollIndex` (its
-  /// position among on-screen same-axis scrollables, in the same order the
-  /// `/swipe` `scrollIndex` resolution uses), and adopts the user-facing
-  /// scroll view's type name and [ValueKey] — `ListView(key: ...)` keys the
-  /// ListView widget, not the inner [Scrollable] it builds.
+  /// position among the same-axis scrollables the dump shows, in the
+  /// same order the `/swipe` `scrollIndex` resolution uses), and adopts
+  /// the user-facing scroll view's type name and [ValueKey] —
+  /// `ListView(key: ...)` keys the ListView widget, not the inner
+  /// [Scrollable] it builds.
   ///
   /// Metrics are omitted (never reported as zeros) when the scroll position
   /// is not attached or has no content dimensions yet.
@@ -2749,9 +2827,9 @@ class TreeWalker {
   /// A point is clear when the frontmost hit there is in the element's own
   /// render lineage (itself, a descendant, or an ancestor behind it — unless
   /// a layer in front swallowed the pointer silently and paints there, see
-  /// [_pointClear]), or is a transparent input layer
-  /// ([_isTransparentOverlay] — a `Positioned.fill(InkWell)` over a card
-  /// paints nothing). Clear at every
+  /// [_pointClear]), or is an input layer that paints nothing at that point
+  /// ([_isTransparentOverlay] — a `Positioned.fill(InkWell)` over a card, a
+  /// page-wide translucent detector whose banner is elsewhere). Clear at every
   /// point → [_Coverage.clear]; at none → [_Coverage.covered]; otherwise
   /// [_Coverage.partial], which the dump reports as `partial: true` instead
   /// of silently dropping the element.
@@ -2812,7 +2890,7 @@ class TreeWalker {
     // A faded-out layer on top (Opacity 0, a finished fade-out kept for
     // layout) still takes the hit but paints nothing over the target.
     if (_renderOpacity(top) < _visibleOpacityThreshold) return true;
-    return _isTransparentOverlay(top, target);
+    return _isTransparentOverlay(top, target, at: point);
   }
 
   /// Whether the branch that won the hit-test at a point over [target]
@@ -2821,8 +2899,20 @@ class TreeWalker {
   /// catching taps for a whole tile). Checks the hit object's own subtree
   /// and its ancestors up to (excluding) the first one that also contains
   /// [target]; any painting render object in that branch is an occluder.
-  bool _isTransparentOverlay(RenderObject top, RenderObject target) {
-    if (_subtreePaints(top)) return false;
+  ///
+  /// With [at] (the coverage check, [_pointClear]) only what the hit
+  /// object's subtree paints at that point counts: a page-wide tap layer
+  /// that draws a banner at the top covers nothing at a point below it.
+  /// Without it (the tap gate, [_judgeLabelPoint]) anything the branch
+  /// paints anywhere refuses the label tap — that layer's own handler, not
+  /// the label's control, would take a tap there, so being visible at a
+  /// point does not make a label tappable at it.
+  bool _isTransparentOverlay(
+    RenderObject top,
+    RenderObject target, {
+    Offset? at,
+  }) {
+    if (_subtreePaints(top, at: at)) return false;
 
     var current = top.parent;
     while (current is RenderObject) {

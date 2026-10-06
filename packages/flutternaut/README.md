@@ -101,6 +101,8 @@ The bridge fails loudly rather than listen somewhere the engine is not looking. 
 
 `GET /health` reports where a bridge is: `port` (the port it is bound to) and, on an iOS simulator, `device_id` (that simulator's UDID).
 
+Every bridged app on an Android device listens on the same device port, so if the app under test stops and another bridged app takes the port, the next request would reach that other app. A client can prevent that by naming the app a request is meant for in the `X-Flutternaut-App` header — the `app` that `GET /health` reports (the package name on Android, the bundle identifier on iOS and macOS). The bridge of any other app answers `409 Conflict` and runs nothing; `GET /health` always answers. Every response names the app that answered in the same header. A bridge that cannot tell which app it runs in (`/health` then has no `app`) sends no such header and does not refuse. The Flutternaut engine does all of this for you.
+
 **Security:** by default the server listens only on the device's loopback interface (`127.0.0.1`), so it is not reachable from the network. The engine reaches it through `adb forward` (Android), the Mac's own loopback (iOS simulators) or a USB forward (`usbmux` / `iproxy`, physical iPhones). The package has **no built-in build-mode gate**: the bridge gives full control of the app to whoever can reach it, so do not ship it in a build you publish to a store (see [Build modes](#build-modes)).
 
 ## Build modes

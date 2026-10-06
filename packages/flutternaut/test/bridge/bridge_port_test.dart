@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:flutternaut/flutternaut.dart';
@@ -213,7 +214,7 @@ void main() {
       );
       expect(data['status'], 'ok');
       expect(data['bridge'], 'flutternaut');
-      expect(data['protocol_version'], '1.6.1');
+      expect(data['protocol_version'], '1.7.0');
       expect(data['instance_id'], matches(RegExp(r'^[0-9a-f]{16}$')));
       expect(data['port'], server.port);
       expect(data['first_frame'], isA<bool>());
@@ -239,6 +240,7 @@ void main() {
         walker: TreeWalker(),
         runner: MainThreadRunner(),
         boundPort: () => null,
+        app: null,
         environment: _env(),
       ).register(router);
       final socket = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -262,11 +264,14 @@ void main() {
 
     tearDown(() => holder.close());
 
-    Future<FlutternautBridgeException> startOn(BridgePortSource source) async {
+    Future<FlutternautBridgeException> startOn(
+      BridgePortSource source, {
+      Map<String, String> environment = const {},
+    }) async {
       final logged = <String>[];
       final server = BridgeServer(
         log: logged.add,
-        environment: _env(),
+        environment: _env(environment),
         address: InternetAddress.loopbackIPv4,
       );
       addTearDown(server.stop);
@@ -308,8 +313,15 @@ void main() {
       );
     });
 
-    test('the default: says another app probably holds it', () async {
-      final e = await startOn(BridgePortSource.defaultPort);
+    test(
+        'the default on an iOS simulator: another app across the booted '
+        'simulators probably holds it', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final e = await startOn(
+        BridgePortSource.defaultPort,
+        environment: {'SIMULATOR_UDID': 'ABCD-1234'},
+      );
       expect(
         e.message,
         allOf(
@@ -321,6 +333,24 @@ void main() {
         ),
       );
       expect(e.toString(), startsWith('FlutternautBridgeException: '));
+    });
+
+    test(
+        'the default on an Android device: another bridged app on this '
+        'device holds it', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final e = await startOn(BridgePortSource.defaultPort);
+      expect(
+        e.message,
+        allOf(
+          contains('could not bind port ${holder.port}'),
+          contains('Another app with the Flutternaut bridge is probably '
+              'already running on this device'),
+          contains('ensureInitialized(port:'),
+          isNot(contains('simulator')),
+        ),
+      );
     });
   });
 
@@ -465,6 +495,7 @@ void main() {
           'Failed to create server socket',
           osError: OSError('Permission denied', 13),
         ),
+        host: BridgeHost.device,
       );
 
       expect(message, contains('could not bind port 8500'));
@@ -481,10 +512,114 @@ void main() {
           'Failed to create server socket',
           osError: OSError('Address already in use', 48),
         ),
+        host: BridgeHost.iosSimulator,
       );
 
       expect(message, contains('Another app'));
       expect(message, isNot(contains('INTERNET')));
+    });
+
+    group('an address in use on the default port, per host', () {
+      String inUse(BridgeHost host) => BridgeServer.bindFailure(
+            resolveBridgePort(argument: null, environment: _env()),
+            const SocketException(
+              'Failed to create server socket',
+              osError: OSError('Address already in use', 98),
+            ),
+            host: host,
+          );
+
+      test('a device (Android, iPhone): another bridged app on it', () {
+        final message = inUse(BridgeHost.device);
+        expect(
+          message,
+          allOf(
+            contains('could not bind port 8500'),
+            contains('Another app with the Flutternaut bridge is probably '
+                'already running on this device and holds port 8500'),
+            contains('only one app on a device can listen on a port'),
+            contains('Stop the other app'),
+            contains('FlutternautBridge.ensureInitialized(port: …) and set '
+                '`bridge_port` to the same number in the Flutternaut engine '
+                'config.'),
+            isNot(contains('simulator')),
+            isNot(contains('Mac')),
+          ),
+        );
+      });
+
+      test('an iOS simulator: the simulators share the Mac\'s ports', () {
+        final message = inUse(BridgeHost.iosSimulator);
+        expect(
+          message,
+          allOf(
+            contains('Another app is probably already serving the bridge'),
+            contains("iOS simulators share the Mac's network stack"),
+            contains('FLUTTERNAUT_BRIDGE_PORT'),
+          ),
+        );
+      });
+
+      test('a Mac: another Mac app or a booted simulator', () {
+        final message = inUse(BridgeHost.mac);
+        expect(
+          message,
+          allOf(
+            contains('Another app on this Mac is probably already serving '
+                'the bridge'),
+            contains("iOS simulators share the Mac's network stack"),
+            contains('FLUTTERNAUT_BRIDGE_PORT'),
+            contains('ensureInitialized(port:'),
+          ),
+        );
+      });
+
+      test('another computer: another app on it', () {
+        final message = inUse(BridgeHost.computer);
+        expect(
+          message,
+          allOf(
+            contains('Another app on this computer is probably already '
+                'serving the bridge'),
+            isNot(contains('simulator')),
+          ),
+        );
+      });
+    });
+
+    group('BridgeHost.detect', () {
+      tearDown(() => debugDefaultTargetPlatformOverride = null);
+
+      test('Android is a device', () {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        expect(BridgeHost.detect(_env()), BridgeHost.device);
+      });
+
+      test('iOS with a simulator UDID is a simulator', () {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        expect(
+          BridgeHost.detect(_env({'SIMULATOR_UDID': 'ABCD-1234'})),
+          BridgeHost.iosSimulator,
+        );
+      });
+
+      test('iOS without one is a physical device', () {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        expect(BridgeHost.detect(_env()), BridgeHost.device);
+        expect(
+          BridgeHost.detect(_env({'SIMULATOR_UDID': ''})),
+          BridgeHost.device,
+        );
+      });
+
+      test('macOS is a Mac; Linux and Windows are computers', () {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        expect(BridgeHost.detect(_env()), BridgeHost.mac);
+        debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+        expect(BridgeHost.detect(_env()), BridgeHost.computer);
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+        expect(BridgeHost.detect(_env()), BridgeHost.computer);
+      });
     });
   });
 }

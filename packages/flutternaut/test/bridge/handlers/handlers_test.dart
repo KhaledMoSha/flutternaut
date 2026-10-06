@@ -26,8 +26,12 @@ void main() {
 
   group('route registration counts', () {
     test('HealthHandler registers 4 routes', () {
-      HealthHandler(walker: walker, runner: runner, boundPort: () => 8500)
-          .register(router);
+      HealthHandler(
+        walker: walker,
+        runner: runner,
+        boundPort: () => 8500,
+        app: null,
+      ).register(router);
       expect(router.routeCount, 4);
     });
 
@@ -63,8 +67,12 @@ void main() {
   });
 
   test('all handlers register without path collisions', () {
-    HealthHandler(walker: walker, runner: runner, boundPort: () => 8500)
-        .register(router);
+    HealthHandler(
+      walker: walker,
+      runner: runner,
+      boundPort: () => 8500,
+      app: null,
+    ).register(router);
     FindHandler(walker: walker, runner: runner).register(router);
     GestureHandler(gesture: gesture, runner: runner).register(router);
     QueryHandler(walker: walker, runner: runner).register(router);

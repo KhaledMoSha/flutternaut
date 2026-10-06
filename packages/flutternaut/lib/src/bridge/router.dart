@@ -96,8 +96,25 @@ class BridgeRouter {
   final Map<String, RouteHandler> _routes = {};
   final void Function(String) _log;
 
-  /// Creates a [BridgeRouter] with an optional [log] callback.
-  BridgeRouter({void Function(String)? log}) : _log = log ?? debugPrint;
+  /// The app this bridge runs in (the `app` of `/health`), or null when the
+  /// platform does not say ([readAppIdentity]).
+  final String? app;
+
+  /// Creates a [BridgeRouter] with an optional [log] callback, for the
+  /// bridge of [app] (null when unknown).
+  BridgeRouter({void Function(String)? log, this.app})
+      : _log = log ?? debugPrint;
+
+  /// The header that names an app. On a request: the app the request is
+  /// meant for. On every response: the app that answered. Every bridged app
+  /// on an Android device binds the same port, so when the app under test
+  /// dies and another bridged app takes the port, this is what keeps that
+  /// other app from executing — and passing — the test's next step.
+  static const String appHeader = 'X-Flutternaut-App';
+
+  /// The route that answers whoever asks: it is how a client finds out
+  /// which app holds the port.
+  static const String _healthPath = '/health';
 
   /// Registers a GET route at [path].
   void get(String path, RouteHandler handler) {
@@ -120,8 +137,29 @@ class BridgeRouter {
   ///
   /// Handlers return just the data map — the envelope is added here.
   /// This gives every endpoint a consistent response shape.
+  ///
+  /// A request whose [appHeader] names another app than [app] is refused
+  /// with 409 before anything else — no route lookup, no body parsing, no
+  /// handler — except `/health`. Every response carries [appHeader] with
+  /// [app] when it is known.
   Future<void> handle(HttpRequest request) async {
     final key = '${request.method} ${request.uri.path}';
+    final meantFor = _meantFor(request);
+    if (meantFor != null && request.uri.path != _healthPath) {
+      // Read and drop the body so the connection stays usable; nothing in
+      // it is looked at.
+      await request.drain<void>();
+      _fail(
+        request,
+        'This bridge belongs to $app, but the request was meant for '
+        '$meantFor: another app holds the bridge port. $meantFor is not '
+        'serving it (it may have stopped or crashed); stop $app and launch '
+        '$meantFor again. Nothing was run.',
+        status: HttpStatus.conflict,
+      );
+      return;
+    }
+
     final handler = _routes[key];
 
     if (handler == null) {
@@ -196,6 +234,18 @@ class BridgeRouter {
     return ' after: $tail';
   }
 
+  /// The app [request] names in [appHeader] when it is not this one, or
+  /// null when it may run here: no header, an empty one, the same app
+  /// (exact match after trimming), or a bridge that does not know its own
+  /// app and so cannot compare.
+  String? _meantFor(HttpRequest request) {
+    final own = app;
+    if (own == null) return null;
+    final named = request.headers.value(appHeader)?.trim();
+    if (named == null || named.isEmpty || named == own) return null;
+    return named;
+  }
+
   void _ok(HttpRequest request, Map<String, dynamic> data) {
     _respond(request, {'success': true, 'data': data});
   }
@@ -214,6 +264,8 @@ class BridgeRouter {
       {int status = 200}) {
     final encoded = jsonEncode(data);
     final bytes = utf8.encode(encoded);
+    final own = app;
+    if (own != null) request.response.headers.set(appHeader, own);
     request.response
       ..statusCode = status
       ..headers.contentType = ContentType.json

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'process_environment.dart';
 
 /// The environment variable a test engine sets to choose the bridge port at
@@ -98,4 +100,42 @@ BridgePort resolveBridgePort({
 String? readSimulatorUdid(EnvironmentReader environment) {
   final udid = environment(simulatorUdidVariable);
   return udid == null || udid.isEmpty ? null : udid;
+}
+
+/// Where the bridge runs, as far as whose ports it shares: what a port
+/// that is already taken most likely means.
+enum BridgeHost {
+  /// An Android device or emulator, or a physical iPhone: a network stack
+  /// of its own, shared by every app on it. Every app built with the bridge
+  /// binds the same device port, so a second one cannot start.
+  device,
+
+  /// An iOS simulator: it shares the Mac's network stack with every other
+  /// booted simulator and with the Mac itself.
+  iosSimulator,
+
+  /// A macOS app: it shares the Mac's ports with the booted simulators.
+  mac,
+
+  /// A Windows or Linux app (and the web, where the bridge does not run).
+  computer;
+
+  /// The host this process runs on. The platform comes from
+  /// [defaultTargetPlatform], which is set in every build mode (and can be
+  /// overridden in tests); an iOS process is a simulator exactly when the
+  /// simulator named it ([readSimulatorUdid]).
+  static BridgeHost detect(EnvironmentReader environment) {
+    if (kIsWeb) return BridgeHost.computer;
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android => BridgeHost.device,
+      TargetPlatform.iOS => readSimulatorUdid(environment) == null
+          ? BridgeHost.device
+          : BridgeHost.iosSimulator,
+      TargetPlatform.macOS => BridgeHost.mac,
+      TargetPlatform.fuchsia ||
+      TargetPlatform.linux ||
+      TargetPlatform.windows =>
+        BridgeHost.computer,
+    };
+  }
 }

@@ -372,13 +372,7 @@ class GestureDispatcher {
     bool fling = true,
   }) async {
     final scrollable = resolveScrollable(direction);
-    final center = walker.centerOfElement(scrollable);
-    if (center == null) {
-      throw ActionFailure(
-        'The scrollable to scroll "$direction" has no on-screen geometry.',
-      );
-    }
-    await swipeAt(center, direction, distance, fling: fling);
+    await _swipeScrollable(scrollable, direction, distance, fling: fling);
     return true;
   }
 
@@ -402,15 +396,38 @@ class GestureDispatcher {
         'scrollable(s) are visible.',
       );
     }
-    final center = walker.centerOfElement(matches[index]);
-    if (center == null) {
+    await _swipeScrollable(matches[index], direction, distance, fling: fling);
+    return true;
+  }
+
+  /// Swipes [scrollable] (one [TreeWalker.findVisibleScrollables] counts)
+  /// from a point where the gesture lands on it
+  /// ([TreeWalker.scrollStartOf]): the centre of its visible part, else the
+  /// first inset sample point nothing covers and the pointer reaches. Its
+  /// unclipped centre is not used — it can be off screen while a page
+  /// slides in, or under a card or a closing page. When no such point
+  /// exists the swipe is refused, never dispatched blind and reported done.
+  Future<void> _swipeScrollable(
+    Element scrollable,
+    String direction,
+    double distance, {
+    required bool fling,
+  }) async {
+    final start = walker.scrollStartOf(scrollable);
+    final point = start.point;
+    if (point == null) {
+      final axis = _axisForDirection(direction);
+      final axisName = axis == Axis.vertical ? 'vertical' : 'horizontal';
+      final index = walker.findVisibleScrollables(axis).indexOf(scrollable);
+      final which = index >= 0 ? ' at scrollIndex $index' : '';
+      final rect = walker.rectOfElement(scrollable);
+      final where = rect != null ? ' @ ${_fmtRect(rect)}' : '';
       throw ActionFailure(
-        'The $axisName scrollable at scrollIndex $index has no on-screen '
-        'geometry.',
+        'Cannot swipe the $axisName scrollable$which$where "$direction": '
+        'no visible point of it takes the pointer — ${start.blocker}.',
       );
     }
-    await swipeAt(center, direction, distance, fling: fling);
-    return true;
+    await swipeAt(point, direction, distance, fling: fling);
   }
 
   /// Maps a swipe [direction] to the scroll axis it moves along.
@@ -421,8 +438,11 @@ class GestureDispatcher {
 
   /// Resolves the visible [Scrollable] to scroll for [direction], or
   /// throws [ActionFailure]. Direction maps to an axis (up/down →
-  /// vertical, left/right → horizontal). Among the on-screen scrollables
-  /// on that axis:
+  /// vertical, left/right → horizontal). Among the scrollables on that
+  /// axis the `/screen` dump shows ([TreeWalker.findVisibleScrollables] —
+  /// never one on a page hidden behind another route, on a closing route,
+  /// or covered at every point by something painted over it, such as a
+  /// loading layer or a drawer's scrim):
   ///
   ///  1. only those that can still move in [direction] count — a list
   ///     already at its end, or a bottom nav bar that never overflows,
@@ -443,8 +463,12 @@ class GestureDispatcher {
     final visible = walker.findVisibleScrollables(axis);
     if (visible.isEmpty) {
       throw ActionFailure(
-        'No $axisName scrollable is visible to scroll "$direction" — pass a '
-        'scroll target (the scrollable\'s key).',
+        'No $axisName scrollable is visible to scroll "$direction": every '
+        'list on that axis is off screen, covered, or on a page that is not '
+        'showing. Something may be in the way — a dialog, bottom sheet, menu '
+        'or page over the list, or a loading layer painted on it — or a '
+        'route transition is still running (wait_idle waits for it). Check '
+        'the current screen before scrolling.',
       );
     }
 
