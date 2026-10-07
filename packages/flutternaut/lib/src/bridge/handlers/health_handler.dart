@@ -76,7 +76,22 @@ class HealthHandler {
   /// the bridge of another app refuses it with 409 and runs nothing
   /// (`/health` always answers), and every response names the app that
   /// answered in the same header.
-  static const String protocolVersion = '1.7.0';
+  ///
+  /// 1.8.0 — a widget is on screen only when at least 1 logical px of it
+  /// shows on both sides after clipping (`TreeWalkerGeometry.minVisibleSide`).
+  /// A sub-pixel sliver — the 0.00002 px remainder of a `PageView` page at
+  /// the screen's edge, a wrapper positioned at the edge — is no `/screen`
+  /// node (its children are judged on their own rects), takes no
+  /// `scrollIndex` and no `nth`, is no `/swipe` or `near` candidate, is not
+  /// visible or `on_screen` to `/is_visible`, and a tap on it is refused as
+  /// off screen. A `scrollIndex` or text `nth` recorded against an older
+  /// bridge can shift, only down. The direction-only auto-pick ranks lists
+  /// by their visible (clipped) area, not their whole rect. A `/swipe` that
+  /// acted on a resolved scrollable reports `moved` (logical px the most
+  /// any list sharing the drag moved) and `room` (whether it had more than
+  /// 1 px to move that way before the gesture); `/is_visible` reports
+  /// `reason` when not visible.
+  static const String protocolVersion = '1.8.0';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

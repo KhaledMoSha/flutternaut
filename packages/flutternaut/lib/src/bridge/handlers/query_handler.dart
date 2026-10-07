@@ -41,14 +41,22 @@ class QueryHandler {
     });
   }
 
+  /// Whether the widget the locator names is visible to a person
+  /// ([TreeWalkerVisibility] — the `/screen` dump's own rule): `visible`,
+  /// `exists`, `on_screen`, `obstructed`, and — when it is not visible —
+  /// `reason`, why not (`… exists but is off-screen or clipped to under
+  /// 1 px`, `… is on a route hidden behind a dialog/sheet/page …`, `no
+  /// widget matches …`).
   Future<Map<String, dynamic>> _isVisible(BridgeRequest req) async {
     return _runner.run<Map<String, dynamic>>(() {
       final result = resolveVisibility(req, _walker);
+      final reason = result.visible ? null : result.reason;
       return {
         'visible': result.visible,
         'exists': result.exists,
         'on_screen': result.onScreen,
         'obstructed': result.obstructed,
+        if (reason != null) 'reason': reason,
       };
     });
   }

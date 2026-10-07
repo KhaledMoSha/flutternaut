@@ -144,8 +144,10 @@ extension TreeWalkerVisibility on TreeWalker {
   ///
   ///  1. laid out and not under an active `Offstage`;
   ///  2. painted at ≥ [_visibleOpacityThreshold] effective opacity;
-  ///  3. a non-empty rect after clipping to the screen and every clipping
-  ///     ancestor;
+  ///  3. at least [TreeWalkerGeometry.minVisibleSide] of it on both sides
+  ///     after clipping to the screen and every clipping ancestor
+  ///     ([_showsEnough]) — a sub-pixel sliver at the screen's edge is not
+  ///     visible;
   ///  4. not on a route hidden by a modal route above it, or being closed
   ///     ([_RouteLayers]);
   ///  5. not covered at every sample point ([_coverage]).
@@ -176,8 +178,8 @@ extension TreeWalkerVisibility on TreeWalker {
       return hidden('is at opacity ${opacity.toStringAsFixed(2)}');
     }
     final rect = _visibleRect(element, screen);
-    if (rect == null || rect.width <= 0 || rect.height <= 0) {
-      return hidden('is off-screen or clipped out of view');
+    if (rect == null || !_showsEnough(rect)) {
+      return hidden('is off-screen or clipped to under 1 px');
     }
     if (layers.hides(element)) {
       return hidden(

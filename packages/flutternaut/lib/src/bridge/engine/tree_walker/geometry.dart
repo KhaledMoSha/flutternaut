@@ -8,9 +8,37 @@ const double _visibleOpacityThreshold = 0.05;
 /// Element geometry: rects, the screen size, on-screen and offstage tests,
 /// painted opacity and clipping.
 extension TreeWalkerGeometry on TreeWalker {
+  /// The smallest side, in logical pixels, a widget's visible rect (after
+  /// clipping to the screen and every clipping ancestor) must have on
+  /// **both** axes for a person to see it ([_showsEnough]). One rule for the
+  /// whole bridge: the `/screen` dump, `scrollIndex`, `/swipe` resolution
+  /// and the auto-pick, `nth`, `near`, the visibility checks and the tap
+  /// gate. A sub-pixel sliver — the next page of a `PageView` left 0.00002
+  /// px on screen by a fractional offset, a wrapper positioned at the
+  /// screen's edge — is not on screen.
+  ///
+  /// The engine catalog applies the same value (`catalog.MinVisibleSide`
+  /// in engine/catalog/visible_size.go; its pin test reads this
+  /// declaration, so keep it on one line): change both, and both pin tests
+  /// (min_visible_side_test.go, test/bridge/min_visible_side_test.dart),
+  /// together.
+  static const double minVisibleSide = 1.0;
+
+  /// Whether a visible rect [r] shows enough of a widget for a person to
+  /// see it: at least [minVisibleSide] on both sides. Null (no geometry),
+  /// empty and negative (clipped away) rects do not.
+  bool _showsEnough(Rect? r) =>
+      r != null && r.width >= minVisibleSide && r.height >= minVisibleSide;
+
   /// The global on-screen [ElementRect] of [element], or null if it has
   /// no laid-out [RenderBox].
   ElementRect? rectOfElement(Element element) => _rectOf(element);
+
+  /// The part of [element] inside the screen and every clipping ancestor
+  /// (see [_visibleRect]), or null when it has no laid-out [RenderBox]. A
+  /// rect without both sides of [minVisibleSide] shows nothing a person can
+  /// see. Public so the gesture engine can rank scrollables by what shows.
+  Rect? visibleRectOf(Element element) => _visibleRect(element, _screenSize);
 
   /// The center of [element]'s on-screen rect, or null if it has no
   /// laid-out geometry.
@@ -49,10 +77,11 @@ extension TreeWalkerGeometry on TreeWalker {
     return view.physicalSize / view.devicePixelRatio;
   }
 
-  /// Whether [element] is laid out with a non-zero size, its rect is still
-  /// non-empty after clipping to the [screen] viewport **and every clipping
-  /// ancestor** (scroll viewports / `ClipRect`s), and it is not hidden under an
-  /// `Offstage` (e.g. inactive tab / `Visibility(maintainState: true)`).
+  /// Whether [element] is laid out, its rect still shows at least
+  /// [minVisibleSide] on both sides after clipping to the [screen] viewport
+  /// **and every clipping ancestor** (scroll viewports / `ClipRect`s)
+  /// ([_showsEnough]), and it is not hidden under an `Offstage` (e.g.
+  /// inactive tab / `Visibility(maintainState: true)`).
   ///
   /// Clipping to ancestors — not just the screen — is what prunes a widget
   /// scrolled out of a *sub-viewport* (a list between a header and footer)
@@ -63,8 +92,7 @@ extension TreeWalkerGeometry on TreeWalker {
     // FadeTransition/Opacity(0) kept for layout) are laid out and hit-testable
     // but invisible — the user can't see them, so they are not "on screen".
     if (_effectiveOpacity(element) < _visibleOpacityThreshold) return false;
-    final r = _visibleRect(element, screen);
-    return r != null && r.width > 0 && r.height > 0;
+    return _showsEnough(_visibleRect(element, screen));
   }
 
   /// Effective painted opacity of [element]: the product of every ancestor

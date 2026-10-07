@@ -15,7 +15,10 @@ extension TreeWalkerScroll on TreeWalker {
   /// one list. Recurses through matches so nested scrollables are also
   /// found — that lets the caller detect genuine same-axis ambiguity.
   ///
-  /// A scrollable counts exactly when the dump emits it as a node. Only
+  /// A scrollable counts exactly when the dump emits it as a node: it shows
+  /// at least [TreeWalkerGeometry.minVisibleSide] on both sides
+  /// ([_isOnScreen]) — the 0.00002 px remainder of a `PageView` page at the
+  /// screen's edge takes no number and is no candidate. Only
   /// routes the user can see count, by the dump walk's own rule: the
   /// subtree of a route hidden behind a page, dialog, sheet or menu, or of
   /// a route that is closing, is pruned. Without it a list on a page kept
@@ -54,6 +57,50 @@ extension TreeWalkerScroll on TreeWalker {
 
     root.visitChildren(visit);
     return matches;
+  }
+
+  /// The [Scrollable] on [axis] that a swipe on [element] moves: [element]
+  /// itself when it is one; the one a scroll view wrapper builds when
+  /// [element] is that wrapper (`ListView(key: …)` keys the `ListView`, not
+  /// its inner [Scrollable]); else the nearest enclosing [Scrollable] on
+  /// [axis] — a swipe on a row moves the list the row is in. Null when none
+  /// of these is on [axis].
+  Element? scrollableMovedBy(Element element, Axis axis) {
+    bool onAxis(Element e) {
+      final widget = e.widget;
+      return widget is Scrollable &&
+          axisDirectionToAxis(widget.axisDirection) == axis;
+    }
+
+    if (onAxis(element)) return element;
+    if (_scrollContainerName(element.widget) != null) {
+      final built = _builtScrollable(element);
+      if (built != null && onAxis(built)) return built;
+    }
+    Element? enclosing;
+    element.visitAncestorElements((ancestor) {
+      if (!onAxis(ancestor)) return true;
+      enclosing = ancestor;
+      return false;
+    });
+    return enclosing;
+  }
+
+  /// The first [Scrollable] under the scroll view wrapper [wrapper], in
+  /// element-tree DFS order — the one it builds — or null.
+  Element? _builtScrollable(Element wrapper) {
+    Element? found;
+    void visit(Element element) {
+      if (found != null) return;
+      if (element.widget is Scrollable) {
+        found = element;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    wrapper.visitChildren(visit);
+    return found;
   }
 
   /// Where a scroll gesture on [scrollable] can start right now: the first

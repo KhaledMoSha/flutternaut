@@ -74,25 +74,26 @@ extension TreeWalkerTap on TreeWalker {
         blocker: 'nothing (the target is not attached to a view)',
       );
     }
-    // Wholly outside the screen or clipped away by its scroll view while no
-    // route transition runs: no point of it can be hit (a hit test outside
-    // the view or a clip reaches nothing), and saying "nothing receives
-    // pointers — a transition" would send the reader to wait for one that
-    // never ends. Typical: a page of a PageView that is not showing (a debug
-    // overlay's hidden page). During a transition a target sliding through
-    // the edge is the transition's doing, and that verdict below stands.
+    // Wholly outside the screen, clipped away by its scroll view, or showing
+    // less than a logical pixel of itself ([_showsEnough]) while no route
+    // transition runs: no point a person could aim at is left (a hit test
+    // outside the view or a clip reaches nothing), and saying "nothing
+    // receives pointers — a transition" would send the reader to wait for
+    // one that never ends. Typical: a page of a PageView that is not showing
+    // (a debug overlay's hidden page, or its 0.00002 px remainder at the
+    // screen's edge). During a transition a target sliding through the edge
+    // is the transition's doing, and that verdict below stands.
     final screen = _screenSize;
-    final visible = _visibleRect(element, screen);
-    if ((visible == null || visible.width <= 0 || visible.height <= 0) &&
-        !isTransitioning) {
+    if (!_showsEnough(_visibleRect(element, screen)) && !isTransitioning) {
       final where = screen == null
           ? 'outside the screen'
           : 'outside the ${_fmtSize(screen)} screen';
       return TapRefused(
         TapRefusal.offScreen,
         center: center,
-        blocker: '$where, or clipped away by the view it scrolls in — it '
-            'is on a page or part of a list that is not showing',
+        blocker: '$where, clipped away by the view it scrolls in, or shows '
+            'under 1 px of itself — it is on a page or part of a list that '
+            'is not showing',
       );
     }
 

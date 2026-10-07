@@ -1964,10 +1964,11 @@ void main() {
         ),
       ));
 
-      final ok =
+      final move =
           await _pumpAndAwait(tester, () => dispatcher.swipeAuto('up', 300));
 
-      expect(ok, isTrue);
+      expect(move?.room, isTrue);
+      expect(move?.moved, greaterThan(0));
     });
 
     testWidgets('axis filter picks the vertical list over a horizontal one',
@@ -1992,10 +1993,11 @@ void main() {
       ));
 
       // Only the outer (vertical) scrollable matches an up/down swipe.
-      final ok =
+      final move =
           await _pumpAndAwait(tester, () => dispatcher.swipeAuto('up', 300));
 
-      expect(ok, isTrue);
+      expect(move?.room, isTrue);
+      expect(move?.moved, greaterThan(0));
     });
 
     testWidgets('throws when no scrollable is on screen', (tester) async {
@@ -2227,14 +2229,16 @@ void main() {
       addTearDown(second.dispose);
       await tester.pumpWidget(twoRails(first, second));
 
-      final ok = await _pumpAndAwait(
+      final move = await _pumpAndAwait(
         tester,
         () => dispatcher.swipeAtIndex(1, 'left', 300),
       );
 
-      expect(ok, isTrue);
       expect(second.offset, greaterThan(0),
           reason: 'the indexed rail must scroll');
+      expect(move?.moved, closeTo(second.offset, 0.001),
+          reason: 'moved reports the indexed rail\'s own offset change');
+      expect(move?.room, isTrue);
       expect(first.offset, 0, reason: 'the sibling rail must stay put');
     });
 

@@ -214,7 +214,7 @@ void main() {
       );
       expect(data['status'], 'ok');
       expect(data['bridge'], 'flutternaut');
-      expect(data['protocol_version'], '1.7.0');
+      expect(data['protocol_version'], '1.8.0');
       expect(data['instance_id'], matches(RegExp(r'^[0-9a-f]{16}$')));
       expect(data['port'], server.port);
       expect(data['first_frame'], isA<bool>());

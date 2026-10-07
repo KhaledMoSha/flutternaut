@@ -53,10 +53,12 @@ extension TreeWalkerCoverage on TreeWalker {
 
   /// The points [_coverage] and [tapReach] sample on [element]:
   /// its visible rect's centre first, then four points inset 25% towards
-  /// each corner. Empty when the element has no visible geometry.
+  /// each corner. Empty when the element has no visible geometry, or shows
+  /// less than [TreeWalkerGeometry.minVisibleSide] on a side
+  /// ([_showsEnough]).
   List<Offset> _samplePoints(Element element, {Size? screen}) {
     final rect = _visibleRect(element, screen ?? _screenSize);
-    if (rect == null || rect.width <= 0 || rect.height <= 0) return const [];
+    if (rect == null || !_showsEnough(rect)) return const [];
     final dx = rect.width / 4;
     final dy = rect.height / 4;
     return [

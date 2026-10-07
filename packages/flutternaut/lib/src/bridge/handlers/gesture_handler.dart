@@ -4,6 +4,7 @@ import '../engine/gesture_dispatcher.dart';
 import '../engine/main_thread_runner.dart';
 import '../engine/tree_walker.dart';
 import '../models/action_result.dart';
+import '../models/scroll_move.dart';
 import '../router.dart';
 import '_locator.dart';
 
@@ -239,11 +240,24 @@ class GestureHandler {
     ).toJson();
   }
 
+  /// Swipes in one of four modes: a widget by `key`/`text` + `direction`,
+  /// the `scrollIndex`-th visible scrollable on the direction's axis +
+  /// `direction`, two absolute points `from` + `to`, or only a `direction`
+  /// (the auto-pick, see [GestureDispatcherScroll.resolveScrollable]).
+  ///
+  /// Whenever the swipe acted on a resolved `Scrollable` (by locator — the
+  /// list itself, the one a keyed `ListView` builds, or the list the widget
+  /// sits in —, by `scrollIndex`, or by the auto-pick) the response adds
+  /// `moved` (absolute logical px the scroll position changed along its
+  /// axis — the most any list sharing the drag moved) and `room` (whether
+  /// the list had more than 1 px to move in that direction before the
+  /// gesture) — see [ScrollMove]. A coordinate swipe, and a
+  /// locator swipe that involves no scrollable on the axis, leave both out.
   Future<Map<String, dynamic>> _swipe(BridgeRequest req) async {
     // Mode 1: element + direction
     final direction = req.string('direction');
     if (req.hasLocator && direction != null) {
-      final success = await _runner.run(
+      final outcome = await _runner.run(
         () => _gesture.swipe(
           key: req.string('key'),
           text: req.string('text'),
@@ -254,8 +268,8 @@ class GestureHandler {
       );
       return ActionResult(
         action: 'swipe',
-        success: success,
-        extras: {'direction': direction},
+        success: outcome.found,
+        extras: {'direction': direction, ...?outcome.move?.toJson()},
       ).toJson();
     }
 
@@ -266,7 +280,7 @@ class GestureHandler {
     final scrollIndex =
         req.body.containsKey('scrollIndex') ? req.integer('scrollIndex') : null;
     if (scrollIndex != null && direction != null) {
-      final success = await _runner.run(
+      final move = await _runner.run(
         () => _gesture.swipeAtIndex(
           scrollIndex,
           direction,
@@ -276,8 +290,12 @@ class GestureHandler {
       );
       return ActionResult(
         action: 'swipe',
-        success: success,
-        extras: {'direction': direction, 'scrollIndex': scrollIndex},
+        success: true,
+        extras: {
+          'direction': direction,
+          'scrollIndex': scrollIndex,
+          ...?move?.toJson(),
+        },
       ).toJson();
     }
 
@@ -293,7 +311,7 @@ class GestureHandler {
     // without an explicit scroll target. Throws ActionFailure if no
     // scrollable matches or the choice is ambiguous.
     if (direction != null) {
-      final success = await _runner.run(
+      final move = await _runner.run(
         () => _gesture.swipeAuto(
           direction,
           req.number('distance', defaultValue: 300),
@@ -302,8 +320,8 @@ class GestureHandler {
       );
       return ActionResult(
         action: 'swipe',
-        success: success,
-        extras: {'direction': direction},
+        success: true,
+        extras: {'direction': direction, ...?move?.toJson()},
       ).toJson();
     }
 

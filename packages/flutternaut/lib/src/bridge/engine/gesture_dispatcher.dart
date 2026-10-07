@@ -4,14 +4,21 @@ import 'package:flutter/widgets.dart';
 import '../models/action_failure.dart';
 import '../models/element_info.dart';
 import '../models/element_rect.dart';
+import '../models/scroll_move.dart';
+import 'main_thread_runner.dart';
 import 'pointer_session.dart';
 import 'tree_walker.dart';
+
+part 'scroll_resolver.dart';
 
 /// Dispatches synthetic gestures through Flutter's [GestureBinding].
 ///
 /// All gestures go through the real pointer event pipeline — the same
 /// path as actual touch input. The app cannot distinguish synthetic
 /// events from real user touches.
+///
+/// Swipes, and which scrollable a swipe acts on, are the
+/// [GestureDispatcherScroll] extension (`scroll_resolver.dart`, a part).
 class GestureDispatcher {
   /// The tree walker used to resolve elements by key or text.
   final TreeWalker walker;
@@ -330,211 +337,6 @@ class GestureDispatcher {
     return true;
   }
 
-  /// Swipes a widget found by [key] or [text] in the given [direction].
-  /// With [fling] false the pointer stops before it lifts, so a scroll view
-  /// moves about [distance] and no further (see [_dispatchMovement]).
-  Future<bool> swipe({
-    String? key,
-    String? text,
-    required String direction,
-    double distance = 300,
-    bool fling = true,
-  }) async {
-    final center = _centerOf(_resolve(key: key, text: text));
-    if (center == null) return false;
-
-    await swipeAt(center, direction, distance, fling: fling);
-    return true;
-  }
-
-  /// Swipes by [distance] in [direction] starting from [center]. Shared by
-  /// the element-targeted [swipe] and the auto-resolved [swipeAuto].
-  Future<void> swipeAt(
-    Offset center,
-    String direction,
-    double distance, {
-    bool fling = true,
-  }) {
-    return _dispatchMovement(
-      center,
-      _directionToDelta(direction, distance),
-      fling: fling,
-    );
-  }
-
-  /// Swipes the single on-screen [Scrollable] whose axis matches
-  /// [direction], for a screen-level scroll when no scroll container is
-  /// specified. Throws [ActionFailure] if none or more than one match
-  /// (see [resolveScrollable]).
-  Future<bool> swipeAuto(
-    String direction,
-    double distance, {
-    bool fling = true,
-  }) async {
-    final scrollable = resolveScrollable(direction);
-    await _swipeScrollable(scrollable, direction, distance, fling: fling);
-    return true;
-  }
-
-  /// Swipes the [index]-th on-screen [Scrollable] — element-tree DFS order,
-  /// exactly the `scrollIndex` the `/screen` dump reports — whose axis
-  /// matches [direction]. Throws [ActionFailure] when the index is out of
-  /// range, so a stale recorded index fails loudly instead of scrolling the
-  /// wrong container.
-  Future<bool> swipeAtIndex(
-    int index,
-    String direction,
-    double distance, {
-    bool fling = true,
-  }) async {
-    final axis = _axisForDirection(direction);
-    final axisName = axis == Axis.vertical ? 'vertical' : 'horizontal';
-    final matches = walker.findVisibleScrollables(axis);
-    if (index < 0 || index >= matches.length) {
-      throw ActionFailure(
-        'scrollIndex $index is out of range: ${matches.length} $axisName '
-        'scrollable(s) are visible.',
-      );
-    }
-    await _swipeScrollable(matches[index], direction, distance, fling: fling);
-    return true;
-  }
-
-  /// Swipes [scrollable] (one [TreeWalkerScroll.findVisibleScrollables]
-  /// counts) from a point where the gesture lands on it
-  /// ([TreeWalkerScroll.scrollStartOf]): the centre of its visible part, else
-  /// the first inset sample point nothing covers and the pointer reaches. Its
-  /// unclipped centre is not used — it can be off screen while a page
-  /// slides in, or under a card or a closing page. When no such point
-  /// exists the swipe is refused, never dispatched blind and reported done.
-  Future<void> _swipeScrollable(
-    Element scrollable,
-    String direction,
-    double distance, {
-    required bool fling,
-  }) async {
-    final start = walker.scrollStartOf(scrollable);
-    final point = start.point;
-    if (point == null) {
-      final axis = _axisForDirection(direction);
-      final axisName = axis == Axis.vertical ? 'vertical' : 'horizontal';
-      final index = walker.findVisibleScrollables(axis).indexOf(scrollable);
-      final which = index >= 0 ? ' at scrollIndex $index' : '';
-      final rect = walker.rectOfElement(scrollable);
-      final where = rect != null ? ' @ ${_fmtRect(rect)}' : '';
-      throw ActionFailure(
-        'Cannot swipe the $axisName scrollable$which$where "$direction": '
-        'no visible point of it takes the pointer — ${start.blocker}.',
-      );
-    }
-    await swipeAt(point, direction, distance, fling: fling);
-  }
-
-  /// Maps a swipe [direction] to the scroll axis it moves along.
-  Axis _axisForDirection(String direction) =>
-      (direction == 'up' || direction == 'down')
-          ? Axis.vertical
-          : Axis.horizontal;
-
-  /// Resolves the visible [Scrollable] to scroll for [direction], or
-  /// throws [ActionFailure]. Direction maps to an axis (up/down →
-  /// vertical, left/right → horizontal). Among the scrollables on that
-  /// axis the `/screen` dump shows
-  /// ([TreeWalkerScroll.findVisibleScrollables] — never one on a page
-  /// hidden behind another route, on a closing route,
-  /// or covered at every point by something painted over it, such as a
-  /// loading layer or a drawer's scrim):
-  ///
-  ///  1. only those that can still move in [direction] count — a list
-  ///     already at its end, or a bottom nav bar that never overflows,
-  ///     is not a candidate;
-  ///  2. one remaining candidate wins;
-  ///  3. several: the one with the clearly largest visible area (at least
-  ///     [_dominantAreaRatio]× the runner-up) is the screen's main list
-  ///     and wins; otherwise the choice is genuinely ambiguous and the
-  ///     author must pass a scroll target or `scrollIndex` — listed in
-  ///     the error — rather than have the engine scroll the wrong list.
-  ///
-  /// Never scrolls a random candidate: every choice is either the only
-  /// one that can move or dominant by area, and the alternative is loud.
-  Element resolveScrollable(String direction) {
-    final axis = _axisForDirection(direction);
-    final axisName = axis == Axis.vertical ? 'vertical' : 'horizontal';
-
-    final visible = walker.findVisibleScrollables(axis);
-    if (visible.isEmpty) {
-      throw ActionFailure(
-        'No $axisName scrollable is visible to scroll "$direction": every '
-        'list on that axis is off screen, covered, or on a page that is not '
-        'showing. Something may be in the way — a dialog, bottom sheet, menu '
-        'or page over the list, or a loading layer painted on it — or a '
-        'route transition is still running (wait_idle waits for it). Check '
-        'the current screen before scrolling.',
-      );
-    }
-
-    final movable = visible.where((e) => _canScroll(e, direction)).toList();
-    if (movable.isEmpty) {
-      throw ActionFailure(
-        'None of the ${visible.length} visible $axisName scrollable(s) can '
-        'scroll "$direction" (at the end of its content, or nothing to '
-        'scroll) — ${_describeScrollables(visible, visible)}.',
-      );
-    }
-    if (movable.length == 1) return movable.single;
-
-    final byArea = [...movable]
-      ..sort((a, b) => _visibleArea(b).compareTo(_visibleArea(a)));
-    final first = _visibleArea(byArea[0]);
-    final second = _visibleArea(byArea[1]);
-    if (second > 0 && first >= second * _dominantAreaRatio) return byArea[0];
-
-    throw ActionFailure(
-      'Ambiguous scroll: ${movable.length} $axisName scrollables are visible '
-      'and can scroll "$direction" — ${_describeScrollables(movable, visible)}. '
-      'Pass a scroll target (the scrollable\'s key) or its scrollIndex to '
-      'disambiguate.',
-    );
-  }
-
-  /// A scrollable must be at least this many times larger (visible area)
-  /// than the next candidate to be chosen as the screen's main list.
-  static const double _dominantAreaRatio = 2.0;
-
-  /// Whether the [Scrollable] element can move further in [direction] —
-  /// it has content dimensions and is not already at the edge the swipe
-  /// pushes it toward. Swiping "up"/"left" advances the scroll offset;
-  /// "down"/"right" retreats it.
-  bool _canScroll(Element scrollable, String direction) {
-    final position = walker.scrollPositionOf(scrollable);
-    if (position == null ||
-        !position.hasPixels ||
-        !position.hasContentDimensions) {
-      return false;
-    }
-    final forward = direction == 'up' || direction == 'left';
-    return forward
-        ? position.pixels < position.maxScrollExtent
-        : position.pixels > position.minScrollExtent;
-  }
-
-  double _visibleArea(Element element) {
-    final rect = walker.rectOfElement(element);
-    return rect == null ? 0 : rect.width * rect.height;
-  }
-
-  /// Describes scrollable candidates with the `scrollIndex` a caller can
-  /// pass back — the index into [all], the same DFS order as the `/screen`
-  /// dump — so an ambiguity error is directly actionable.
-  String _describeScrollables(List<Element> shown, List<Element> all) {
-    return shown.map((e) {
-      final index = all.indexOf(e);
-      final rect = walker.rectOfElement(e);
-      final rectPart = rect != null ? ' @ ${_fmtRect(rect)}' : '';
-      return '[scrollIndex $index ${e.widget.runtimeType}$rectPart]';
-    }).join(', ');
-  }
-
   /// Swipes between two absolute screen coordinates.
   Future<bool> swipeFromTo(Offset from, Offset to) {
     return _dispatchMovement(from, to - from).then((_) => true);
@@ -850,23 +652,6 @@ class GestureDispatcher {
     }).join(', ');
   }
 
-  String _fmtOffset(Offset o) =>
-      '(${o.dx.toStringAsFixed(1)}, ${o.dy.toStringAsFixed(1)})';
-
-  String _fmtRect(ElementRect r) =>
-      '(${r.x.toStringAsFixed(1)}, ${r.y.toStringAsFixed(1)} '
-      '${r.width.toStringAsFixed(1)}x${r.height.toStringAsFixed(1)})';
-
-  static Offset _directionToDelta(String direction, double distance) {
-    return switch (direction) {
-      'up' => Offset(0, -distance),
-      'down' => Offset(0, distance),
-      'left' => Offset(-distance, 0),
-      'right' => Offset(distance, 0),
-      _ => Offset(0, -distance),
-    };
-  }
-
   // ---------------------------------------------------------------------------
   // Pointer session — eliminates duplicated lifecycle boilerplate
   // ---------------------------------------------------------------------------
@@ -987,9 +772,22 @@ class GestureDispatcher {
     return moves < steps ? moves : steps;
   }
 
+  /// Waits for [count] frames, asking for each. Gestures run inside a
+  /// post-frame callback ([MainThreadRunner.run]), where `endOfFrame` alone
+  /// schedules nothing: a gesture nothing reacts to (a list whose physics
+  /// refuse drags) would wait for a frame no one asked for.
   Future<void> _pumpFrames({int count = 1}) async {
     for (var i = 0; i < count; i++) {
-      await WidgetsBinding.instance.endOfFrame;
+      await (WidgetsBinding.instance..scheduleFrame()).endOfFrame;
     }
   }
 }
+
+/// [o] as `(x, y)`, logical pixels to one decimal, for failure messages.
+String _fmtOffset(Offset o) =>
+    '(${o.dx.toStringAsFixed(1)}, ${o.dy.toStringAsFixed(1)})';
+
+/// [r] as `(x, y wxh)`, logical pixels to one decimal, for failure messages.
+String _fmtRect(ElementRect r) =>
+    '(${r.x.toStringAsFixed(1)}, ${r.y.toStringAsFixed(1)} '
+    '${r.width.toStringAsFixed(1)}x${r.height.toStringAsFixed(1)})';
