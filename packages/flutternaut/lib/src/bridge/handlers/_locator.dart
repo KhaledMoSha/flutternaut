@@ -63,7 +63,7 @@ VisibilityResult resolveVisibility(BridgeRequest req, TreeWalker walker) {
 
 /// The control a state route (`/assert_enabled`, `/assert_disabled`,
 /// `/is_enabled`) checks for the locator on [req] — see
-/// [TreeWalker.resolveStateTarget]. `match` and `nth` are honoured.
+/// [TreeWalkerControls.resolveStateTarget]. `match` and `nth` are honoured.
 StateTarget resolveStateLocator(BridgeRequest req, TreeWalker walker) {
   return walker.resolveStateTarget(
     key: req.string('key'),

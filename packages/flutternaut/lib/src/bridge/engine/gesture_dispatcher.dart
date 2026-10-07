@@ -400,10 +400,10 @@ class GestureDispatcher {
     return true;
   }
 
-  /// Swipes [scrollable] (one [TreeWalker.findVisibleScrollables] counts)
-  /// from a point where the gesture lands on it
-  /// ([TreeWalker.scrollStartOf]): the centre of its visible part, else the
-  /// first inset sample point nothing covers and the pointer reaches. Its
+  /// Swipes [scrollable] (one [TreeWalkerScroll.findVisibleScrollables]
+  /// counts) from a point where the gesture lands on it
+  /// ([TreeWalkerScroll.scrollStartOf]): the centre of its visible part, else
+  /// the first inset sample point nothing covers and the pointer reaches. Its
   /// unclipped centre is not used — it can be off screen while a page
   /// slides in, or under a card or a closing page. When no such point
   /// exists the swipe is refused, never dispatched blind and reported done.
@@ -439,8 +439,9 @@ class GestureDispatcher {
   /// Resolves the visible [Scrollable] to scroll for [direction], or
   /// throws [ActionFailure]. Direction maps to an axis (up/down →
   /// vertical, left/right → horizontal). Among the scrollables on that
-  /// axis the `/screen` dump shows ([TreeWalker.findVisibleScrollables] —
-  /// never one on a page hidden behind another route, on a closing route,
+  /// axis the `/screen` dump shows
+  /// ([TreeWalkerScroll.findVisibleScrollables] — never one on a page
+  /// hidden behind another route, on a closing route,
   /// or covered at every point by something painted over it, such as a
   /// loading layer or a drawer's scrim):
   ///
@@ -596,7 +597,8 @@ class GestureDispatcher {
   ///   2. Single match → scroll it into view (best-effort), settle, then
   ///      confirm it is genuinely tappable via a real hit-test.
   ///   3. Multiple matches → the visible ones count, in reading order —
-  ///      the one list every `nth` indexes ([TreeWalker.visibleMatches]).
+  ///      the one list every `nth` indexes
+  ///      ([TreeWalkerVisibility.visibleMatches]).
   ///      With [nth], that index wins (out of range → fail, naming the
   ///      count). Without it, exactly one must remain; zero → fail
   ///      (nothing visible to act on); two or more → fail as ambiguous,
@@ -730,7 +732,7 @@ class GestureDispatcher {
 
   /// Confirms the single matched [element] is tappable, returning the point
   /// to tap, or throwing [ActionFailure] explaining why it is not (see
-  /// [TreeWalker.tapReach]). The engine re-tries a refused step for its
+  /// [TreeWalkerTap.tapReach]). The engine re-tries a refused step for its
   /// timeout, so a refusal that names a passing state (a splash, a scroll, a
   /// navigation) resolves on its own; one that does not is a real finding.
   Offset _confirmHittable(Element element, String desc) {

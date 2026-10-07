@@ -35,8 +35,8 @@ class WaitHandler {
   }
 
   /// Waits until the locator is visible to a person (see
-  /// [TreeWalker.checkTextVisible]); on timeout the result's `detail` says
-  /// why it was not, as of the last check.
+  /// [TreeWalkerVisibility.checkTextVisible]); on timeout the result's
+  /// `detail` says why it was not, as of the last check.
   Future<Map<String, dynamic>> _waitUntilVisible(BridgeRequest req) async {
     _rejectUnknownMatch(req);
     final result = await _pollExplained(
@@ -81,8 +81,8 @@ class WaitHandler {
   }
 
   /// Waits until no route transition is running (see
-  /// [TreeWalker.isTransitioning]) — every page push/pop, dialog, sheet and
-  /// menu open/close has finished. Continuous content animations (a
+  /// [TreeWalkerRoutes.isTransitioning]) — every page push/pop, dialog, sheet
+  /// and menu open/close has finished. Continuous content animations (a
   /// spinner, a Lottie loop) never end and are deliberately not waited for.
   Future<Map<String, dynamic>> _waitForIdle(BridgeRequest req) async {
     final result = await _poll(

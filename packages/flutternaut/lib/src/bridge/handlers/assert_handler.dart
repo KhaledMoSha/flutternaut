@@ -132,8 +132,9 @@ class AssertHandler {
   /// Asserts that the control the locator names is enabled
   /// ([expectEnabled]) or disabled — the control that owns the matched
   /// widget, so a button's label answers with the button's state (see
-  /// [TreeWalker.resolveStateTarget]). A locator that names no control at
-  /// all fails both ways, and finally: it is neither enabled nor disabled.
+  /// [TreeWalkerControls.resolveStateTarget]). A locator that names no
+  /// control at all fails both ways, and finally: it is neither enabled nor
+  /// disabled.
   Map<String, dynamic> _stateAssert(BridgeRequest req,
       {required bool expectEnabled}) {
     return switch (resolveStateLocator(req, _walker)) {

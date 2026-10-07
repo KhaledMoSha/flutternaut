@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import '../engine/gesture_dispatcher.dart';
 import '../engine/main_thread_runner.dart';
+import '../engine/tree_walker.dart';
 import '../models/action_result.dart';
 import '../router.dart';
 import '_locator.dart';
