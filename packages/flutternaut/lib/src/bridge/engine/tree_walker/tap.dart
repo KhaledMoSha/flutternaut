@@ -74,6 +74,13 @@ extension TreeWalkerTap on TreeWalker {
         blocker: 'nothing (the target is not attached to a view)',
       );
     }
+    // On a page another route hides: not on screen for the user, whatever
+    // the hit test says about what the top page paints over it.
+    final hiddenRoute = hiddenRouteRefusal(element);
+    if (hiddenRoute != null) {
+      return TapRefused(TapRefusal.hiddenRoute,
+          center: center, blocker: hiddenRoute);
+    }
     // Wholly outside the screen, clipped away by its scroll view, or showing
     // less than a logical pixel of itself ([_showsEnough]) while no route
     // transition runs: no point a person could aim at is left (a hit test

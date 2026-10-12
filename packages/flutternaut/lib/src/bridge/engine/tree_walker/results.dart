@@ -65,6 +65,11 @@ enum TapRefusal {
   /// Something painted over the target would take the tap.
   covered,
 
+  /// The target is on a page, dialog or sheet that another route shown above
+  /// it hides ([TreeWalkerRoutes.hiddenRouteRefusal]); `blocker` is the
+  /// whole reason, not a widget.
+  hiddenRoute,
+
   /// The target is visible but takes no input right now: the pointer is
   /// swallowed before it gets there (an `AbsorbPointer`, the Navigator right
   /// after a navigation, a list that is still scrolling).

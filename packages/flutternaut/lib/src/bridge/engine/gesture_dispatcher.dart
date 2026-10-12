@@ -532,11 +532,10 @@ class GestureDispatcher {
     return const [];
   }
 
-  /// Confirms the single matched [element] is tappable, returning the point
-  /// to tap, or throwing [ActionFailure] explaining why it is not (see
-  /// [TreeWalkerTap.tapReach]). The engine re-tries a refused step for its
-  /// timeout, so a refusal that names a passing state (a splash, a scroll, a
-  /// navigation) resolves on its own; one that does not is a real finding.
+  /// Confirms the matched [element] is tappable, returning the point to tap,
+  /// or throwing [ActionFailure] saying why not ([TreeWalkerTap.tapReach]).
+  /// The engine re-tries a refused step for its timeout: a refusal naming a
+  /// passing state (a splash, a scroll, a navigation) resolves on its own.
   Offset _confirmHittable(Element element, String desc) {
     switch (walker.tapReach(element)) {
       case TapReachable(:final point):
@@ -554,6 +553,7 @@ class GestureDispatcher {
                 'pointer events until it ends. Run wait_idle, then retry.',
           TapRefusal.covered => '$desc is present$at but a tap there would '
               'reach $blocker instead — it is occluded or off-screen.',
+          TapRefusal.hiddenRoute => '$desc $blocker.',
           TapRefusal.inputBlocked => '$desc is visible$at but takes no taps '
               'right now: $blocker swallows the pointer before it gets '
               'there.',
@@ -568,8 +568,8 @@ class GestureDispatcher {
   ///
   /// Two rules keep this from moving the screen under the test:
   ///
-  ///  * A target that is already reachable is left exactly where it is, and
-  ///    so is one that is visible but blocked ([TapRefusal.inputBlocked]).
+  ///  * A reachable target is left where it is; so is a blocked or hidden one
+  ///    ([TapRefusal.inputBlocked], [TapRefusal.hiddenRoute]).
   ///  * Only ancestors the **user** could scroll are scrolled. An ancestor
   ///    whose physics refuse user offsets (`NeverScrollableScrollPhysics`) is
   ///    app-controlled: debug overlays such as `requests_inspector` wrap the
@@ -582,10 +582,10 @@ class GestureDispatcher {
     switch (walker.tapReach(target)) {
       case TapReachable():
         return;
-      // Visible but blocked — typically a list that is still scrolling.
-      // Scrolling it now would jump it and move the screen under the test;
-      // the gate refuses, and the step re-tries once input is accepted.
+      // Blocked (a list still scrolling) or on a hidden page: scrolling would
+      // move a screen nobody acts on; the gate refuses and the step re-tries.
       case TapRefused(refusal: TapRefusal.inputBlocked):
+      case TapRefused(refusal: TapRefusal.hiddenRoute):
         return;
       case TapRefused():
         break;

@@ -91,7 +91,13 @@ class HealthHandler {
   /// any list sharing the drag moved) and `room` (whether it had more than
   /// 1 px to move that way before the gesture); `/is_visible` reports
   /// `reason` when not visible.
-  static const String protocolVersion = '1.8.0';
+  ///
+  /// 1.8.1 — wording only: a gated action (`tap`, `long_press`, `type`, …)
+  /// whose one match sits on a page, dialog or sheet hidden behind another
+  /// route says so (`… is on a page hidden behind the page on top — it
+  /// cannot be acted on until that page closes`) instead of "occluded or
+  /// off-screen". Same refusal, same retry; no engine gate.
+  static const String protocolVersion = '1.8.1';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

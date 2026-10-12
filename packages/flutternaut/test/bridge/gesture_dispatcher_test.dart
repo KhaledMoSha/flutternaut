@@ -855,6 +855,164 @@ void main() {
     });
   });
 
+  group('a tap target on a page hidden behind the page on top', () {
+    Future<GlobalKey<NavigatorState>> pumpTwoPages(
+      WidgetTester tester, {
+      required void Function() onNext,
+      required Widget top,
+      bool opaque = true,
+    }) async {
+      final nav = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: nav,
+        home: Scaffold(
+          body: Center(
+            child: ElevatedButton(onPressed: onNext, child: const Text('Next')),
+          ),
+        ),
+      ));
+      nav.currentState!.push(PageRouteBuilder<void>(
+        settings: const RouteSettings(name: '/otp'),
+        opaque: opaque,
+        pageBuilder: (_, __, ___) => top,
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+      ));
+      await tester.pumpAndSettle();
+      return nav;
+    }
+
+    testWidgets('is refused as hidden behind the page on top, not occluded',
+        (tester) async {
+      var tapped = false;
+      await pumpTwoPages(
+        tester,
+        onNext: () => tapped = true,
+        top: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: ElevatedButton(
+              onPressed: () {},
+              child: const Text('Verify'),
+            ),
+          ),
+        ),
+      );
+
+      await expectLater(
+        dispatcher.tap(text: 'Next'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+            contains('is on a page hidden behind the page on top'),
+            contains('(hidden route /)'),
+            contains('until that page closes'),
+            isNot(contains('occluded')),
+          ),
+        )),
+      );
+      expect(tapped, isFalse);
+    });
+
+    testWidgets('a list on the hidden page is not scrolled before the refusal',
+        (tester) async {
+      final controller = ScrollController();
+      addTearDown(controller.dispose);
+      final nav = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(MaterialApp(
+        navigatorKey: nav,
+        home: Scaffold(
+          body: ListView(
+            controller: controller,
+            children: [
+              for (var i = 0; i < 60; i++)
+                SizedBox(
+                  height: 60,
+                  child: TextButton(onPressed: () {}, child: Text('Row $i')),
+                ),
+            ],
+          ),
+        ),
+      ));
+      nav.currentState!.push(PageRouteBuilder<void>(
+        settings: const RouteSettings(name: '/otp'),
+        pageBuilder: (_, __, ___) => const Scaffold(body: Text('OTP')),
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+      ));
+      await tester.pumpAndSettle();
+
+      await expectLater(
+        dispatcher.tap(text: 'Row 12'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          contains('is on a page hidden behind the page on top'),
+        )),
+      );
+      expect(controller.offset, 0);
+    });
+
+    testWidgets('a widget covered on the top route keeps the occluded wording',
+        (tester) async {
+      await tester.pumpWidget(_app(
+        Stack(children: [
+          Center(
+            child: ElevatedButton(onPressed: () {}, child: const Text('Next')),
+          ),
+          Positioned.fill(
+            child: GestureDetector(
+              onTap: () {},
+              child: const ColoredBox(color: Color(0xFFFFFFFF)),
+            ),
+          ),
+        ]),
+      ));
+
+      await expectLater(
+        dispatcher.tap(text: 'Next'),
+        throwsA(isA<ActionFailure>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('occluded or off-screen'), isNot(contains('hidden'))),
+        )),
+      );
+    });
+
+    testWidgets('a single visible match still taps', (tester) async {
+      var tapped = false;
+      await tester.pumpWidget(_app(
+        Center(
+          child: ElevatedButton(
+            onPressed: () => tapped = true,
+            child: const Text('Next'),
+          ),
+        ),
+      ));
+
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Next'));
+
+      expect(tapped, isTrue);
+    });
+
+    testWidgets('the page is tappable again once the top page closes',
+        (tester) async {
+      var tapped = false;
+      final nav = await pumpTwoPages(
+        tester,
+        onNext: () => tapped = true,
+        top: const Scaffold(body: Text('OTP')),
+      );
+      nav.currentState!.pop();
+      await tester.pumpAndSettle();
+
+      await _pumpAndAwait(tester, () => dispatcher.tap(text: 'Next'));
+
+      expect(tapped, isTrue);
+    });
+  });
+
   group('a tap target on a page that is not showing', () {
     // A debug overlay's hidden page (requests_inspector: the second page of
     // a NeverScrollable PageView) can stay laid out beside the screen. A

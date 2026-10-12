@@ -189,6 +189,30 @@ extension TreeWalkerRoutes on TreeWalker {
     return (kind ?? 'animation', owner);
   }
 
+  /// The refusal for [element] when it sits on a page, dialog or sheet that
+  /// another route shown above it hides from the user (an opaque page pushed
+  /// over it, a dialog or sheet with its barrier); null when its route is
+  /// showing, or is merely closing (the pop transition has its own refusal).
+  /// Without it the hit-test gate would only say "occluded" about whatever
+  /// the top page paints over the widget. Read-only: nothing waits or
+  /// settles.
+  String? hiddenRouteRefusal(Element element) {
+    final hidden = _routeLayers()._hidden;
+    if (hidden.isEmpty) return null;
+    String? refusal;
+    element.visitAncestorElements((ancestor) {
+      final route = _routeOfScope(ancestor);
+      if (route == null || !hidden.contains(route)) return true;
+      if (route.animation?.status == AnimationStatus.reverse) return true;
+      final name = route.settings.name;
+      final named = name == null || name.isEmpty ? '' : ' (hidden route $name)';
+      refusal = 'is on a page hidden behind the page on top$named — it '
+          'cannot be acted on until that page closes';
+      return false;
+    });
+    return refusal;
+  }
+
   /// A snapshot of which routes are hidden right now (see [_RouteLayers]).
   _RouteLayers _routeLayers() {
     final routes = _modalRoutes();
