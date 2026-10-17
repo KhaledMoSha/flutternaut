@@ -175,9 +175,11 @@ extension TreeWalkerTap on TreeWalker {
   ///     `Positioned.fill(InkWell)` over a card, an empty field under its
   ///     hint) or is faded out, the tap is what a person's would be: allowed.
   ///  3. The frontmost hit is an ancestor of the label → find what blocks
-  ///     the label ([_silentClaimer], else [_ignoringBetween]): none means
-  ///     the ancestor itself takes the tap
-  ///     (an opaque handler over a child that ignores pointers): allowed. A
+  ///     the label ([_silentClaimer], else [_blockerBetween]): none means
+  ///     the ancestor itself takes the tap — allowed only when it is a tap
+  ///     handler ([_tapHandlerOver]: an opaque handler over a child that
+  ///     takes no pointers), else [TapRefusal.inputBlocked] (a page's
+  ///     `Material` absorbs the pointer and does nothing with it). A
   ///     silent claimer painted in front (a splash in an `AbsorbPointer`) →
   ///     [TapRefusal.covered]. Any other blocker → allowed only when a tap
   ///     handler wraps it ([_handlerWraps], the
@@ -210,11 +212,14 @@ extension TreeWalkerTap on TreeWalker {
     }
 
     final claimer = _silentClaimer(top, point, stopAt: target);
-    final blocker = claimer ?? _ignoringBetween(top, target);
+    final blocker = claimer ?? _blockerBetween(top, target, point);
     if (blocker == null) {
+      final taker = _tapHandlerOver(top);
       return (
-        refusal: null,
-        blocker: () => _describeHit(top),
+        refusal: taker == null ? TapRefusal.inputBlocked : null,
+        blocker: taker == null
+            ? () => '${_describeHit(top)}, which handles no taps,'
+            : () => _describeHit(taker),
         ancestorTook: true,
       );
     }

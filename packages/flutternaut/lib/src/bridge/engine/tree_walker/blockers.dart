@@ -13,6 +13,21 @@ const Set<Type> _tapRecognizers = {
 /// the element tree (its scope, gesture detector and semantics wrappers).
 const int _scrollableBuildDepth = 16;
 
+/// How a render object's own hit test answers a point ([TreeWalkerBlockers]).
+enum _PointHit {
+  /// The point is inside its bounds and it claims it.
+  claims,
+
+  /// The point is inside its bounds, yet it refuses it.
+  refuses,
+
+  /// The point is outside its bounds.
+  outside,
+
+  /// It cannot be asked (not laid out, or not a box or sliver).
+  unknown,
+}
+
 /// What swallows or takes a pointer before it reaches a target, and how that is
 /// named.
 extension TreeWalkerBlockers on TreeWalker {
@@ -62,21 +77,103 @@ extension TreeWalkerBlockers on TreeWalker {
     return null;
   }
 
-  /// The outermost `IgnorePointer` that is ignoring between [top]
-  /// (exclusive) and [target] — what keeps the pointer from a target whose
-  /// ancestor [top] took the hit itself (a Scrollable ignores pointers on its
-  /// content while a scroll animates or flings). Null when there is none.
-  RenderObject? _ignoringBetween(RenderObject top, RenderObject target) {
+  /// The outermost render object between [top] (exclusive) and [target]
+  /// that keeps the pointer at the global [point] from the target — what
+  /// stops it when the target's ancestor [top] took the hit itself. Null
+  /// when there is none.
+  ///
+  /// Two kinds: an ignoring `IgnorePointer` (a Scrollable ignores pointers
+  /// on its content while a scroll animates or flings), and any render
+  /// object that refuses, inside its own bounds, a point its child on the way
+  /// to [target] claims ([_hitAt]) — a custom `hitTest` returning false,
+  /// such as a `Skeletonizer` with `ignorePointers` drawing a loading page's
+  /// placeholder labels: they read like the real rows, but nothing under
+  /// them takes a tap.
+  RenderObject? _blockerBetween(
+    RenderObject top,
+    RenderObject target,
+    Offset point,
+  ) {
     RenderObject? found;
+    var childClaims = _hitAt(target, point) == _PointHit.claims;
     var current = target.parent;
     while (current is RenderObject && !identical(current, top)) {
-      if ((current is RenderIgnorePointer && current.ignoring) ||
-          (current is RenderSliverIgnorePointer && current.ignoring)) {
+      final hit = _hitAt(current, point);
+      if (_isIgnoring(current) || (childClaims && hit == _PointHit.refuses)) {
         found = current;
       }
+      if (hit != _PointHit.unknown) childClaims = hit == _PointHit.claims;
       current = current.parent;
     }
     return found;
+  }
+
+  /// Whether [ro] is an `IgnorePointer` (box or sliver) that is ignoring.
+  bool _isIgnoring(RenderObject ro) =>
+      (ro is RenderIgnorePointer && ro.ignoring) ||
+      (ro is RenderSliverIgnorePointer && ro.ignoring);
+
+  /// How [ro]'s own hit test answers the global [point]: whether it claims
+  /// it, refuses it although the point is inside its bounds, or the point
+  /// is outside them. [_PointHit.unknown] when [ro] cannot be asked (not
+  /// laid out, not a box or sliver, or a transform without an inverse).
+  _PointHit _hitAt(RenderObject ro, Offset point) {
+    if (!ro.attached) return _PointHit.unknown;
+    final inverse = Matrix4.tryInvert(ro.getTransformTo(null));
+    if (inverse == null) return _PointHit.unknown;
+    final local = MatrixUtils.transformPoint(inverse, point);
+    if (ro is RenderBox) {
+      if (!ro.hasSize) return _PointHit.unknown;
+      if (!ro.size.contains(local)) return _PointHit.outside;
+      return ro.hitTest(BoxHitTestResult(), position: local)
+          ? _PointHit.claims
+          : _PointHit.refuses;
+    }
+    if (ro is RenderSliver) return _sliverHitAt(ro, local);
+    return _PointHit.unknown;
+  }
+
+  /// [_hitAt] for a sliver, from the [local] point in its paint coordinates:
+  /// the main-axis position counts from the edge the sliver grows from, as a
+  /// viewport computes it for its children.
+  _PointHit _sliverHitAt(RenderSliver sliver, Offset local) {
+    final geometry = sliver.geometry;
+    if (geometry == null) return _PointHit.unknown;
+    final extent = geometry.paintExtent;
+    final direction = applyGrowthDirectionToAxisDirection(
+      sliver.constraints.axisDirection,
+      sliver.constraints.growthDirection,
+    );
+    final (main, cross) = switch (direction) {
+      AxisDirection.down => (local.dy, local.dx),
+      AxisDirection.up => (extent - local.dy, local.dx),
+      AxisDirection.right => (local.dx, local.dy),
+      AxisDirection.left => (extent - local.dx, local.dy),
+    };
+    if (main < 0 ||
+        main >= extent ||
+        cross < 0 ||
+        cross >= sliver.constraints.crossAxisExtent) {
+      return _PointHit.outside;
+    }
+    return sliver.hitTest(
+      SliverHitTestResult(),
+      mainAxisPosition: main,
+      crossAxisPosition: cross,
+    )
+        ? _PointHit.claims
+        : _PointHit.refuses;
+  }
+
+  /// The tap handler that takes a pointer its own frontmost hit [top]
+  /// claimed — [top] is the handler's listener (an opaque `GestureDetector`),
+  /// or the handler wraps [top] with nothing painted between them (a tile's
+  /// `InkWell` around its coloured box). Null when no tap handler does: a
+  /// page's `Material` that only hit-tests itself to absorb pointers takes
+  /// the tap and does nothing with it.
+  RenderObject? _tapHandlerOver(RenderObject top) {
+    if (_isTapHandler(top)) return top;
+    return _handlerWraps(top, top);
   }
 
   /// The tap handler that receives a pointer [blocker] keeps from the
@@ -227,14 +324,20 @@ extension TreeWalkerBlockers on TreeWalker {
 
   /// A readable name for the widget that owns the hit render object [ro]:
   /// its nearest control ([_controlOf]) with that control's label, else the
-  /// creating widget's type. Found through [_elementOwning], so it reads the
-  /// same in debug, profile and release builds.
+  /// creating widget's type with only the text or semantics label it carries
+  /// itself — a page's `Material` is not named after the first text on the
+  /// page. Found through [_elementOwning], so it reads the same in debug,
+  /// profile and release builds.
   String _describeHit(RenderObject ro) {
     final element = _elementOwning(ro);
     if (element == null) return ro.runtimeType.toString();
-    final owner = _controlOf(element) ?? element;
-    final label = extractText(owner);
-    final semantics = semanticsOf(owner);
+    final control = _controlOf(element);
+    final owner = control ?? element;
+    final label =
+        control != null ? extractText(control) : _widgetOwnText(element.widget);
+    final semantics = control != null
+        ? semanticsOf(control)
+        : TreeWalker.ownSemanticsOf(element.widget);
     final name = owner.widget.runtimeType.toString();
     if (label != null && _hasAlnum(label)) return '$name "$label"';
     if (semantics != null) return '$name (semantics "$semantics")';

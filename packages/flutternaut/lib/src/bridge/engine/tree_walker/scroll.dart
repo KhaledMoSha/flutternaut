@@ -149,7 +149,7 @@ extension TreeWalkerScroll on TreeWalker {
     }
     if (_isRenderAncestorOrSelf(top, target)) {
       final blocker = _silentClaimer(top, point, stopAt: target) ??
-          _ignoringBetween(top, target);
+          _blockerBetween(top, target, point);
       if (blocker != null) {
         return 'the pointer is swallowed by ${_describeBlocker(blocker)}';
       }

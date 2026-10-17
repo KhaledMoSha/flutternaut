@@ -69,7 +69,8 @@ class ElementInfo {
           rect == other.rect;
 
   @override
-  int get hashCode => Object.hash(found, type, key, text, enabled, checked, rect);
+  int get hashCode =>
+      Object.hash(found, type, key, text, enabled, checked, rect);
 
   @override
   String toString() =>

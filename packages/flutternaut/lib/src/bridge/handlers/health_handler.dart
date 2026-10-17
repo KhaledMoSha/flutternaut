@@ -97,7 +97,18 @@ class HealthHandler {
   /// route says so (`… is on a page hidden behind the page on top — it
   /// cannot be acted on until that page closes`) instead of "occluded or
   /// off-screen". Same refusal, same retry; no engine gate.
-  static const String protocolVersion = '1.8.1';
+  ///
+  /// 1.8.2 — the tap gate no longer passes a tap that would do nothing. A
+  /// label under an ancestor whose own hit test refuses the pointer (a
+  /// `Skeletonizer` with `ignorePointers` drawing a loading page's
+  /// placeholder rows, any custom `hitTest` returning false, box or sliver)
+  /// is refused as taking no taps, naming that ancestor; so is a label whose
+  /// frontmost hit is an ancestor that handles no taps (a page's `Material`).
+  /// The engine re-tries the refusal for the step's timeout, so the tap lands
+  /// on the real row once the page has loaded. A non-control the pointer
+  /// reached is named with only its own text, never the first text under it.
+  /// No engine gate.
+  static const String protocolVersion = '1.8.2';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;
