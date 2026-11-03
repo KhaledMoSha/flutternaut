@@ -23,10 +23,13 @@ const int _animationOwnerHops = 8;
 extension TreeWalkerRoutes on TreeWalker {
   /// Whether a **route transition** is in progress right now — a page push
   /// or pop, a dialog, bottom sheet or menu opening or closing, or an
-  /// interactive back-swipe. This is what `/wait_for_idle` waits for and
-  /// what the dump's `animating` flag reports: while a route animates,
-  /// Flutter drops or cancels pointers, so acting mid-transition is
-  /// unreliable.
+  /// interactive back-swipe. This is what `/wait_for_idle` waits for, what
+  /// the dump's `animating` flag reports and what refuses every tap-like
+  /// gesture ([transitionRefusal], bridge protocol 1.11.0): mid-transition
+  /// the page under the pointer is still sliding or fading, and Flutter
+  /// ignores pointers only on a closing route — a page opening takes them.
+  /// A route in a part of the tree that is not showing never counts (see
+  /// [_scanTransitions]).
   ///
   /// Continuous content animations (a spinner, a Lottie loop, a live map
   /// feed) are deliberately NOT transitions — they never end, so waiting
@@ -77,13 +80,18 @@ extension TreeWalkerRoutes on TreeWalker {
   /// `_ModalScopeStatus` inherited widget each route builds. Reading the
   /// route through the element — instead of `ModalRoute.of(context)` —
   /// registers no dependency, so inspecting the app never makes it rebuild.
-  List<ModalRoute<Object?>> _modalRoutes() {
+  List<ModalRoute<Object?>> _modalRoutes() =>
+      [for (final (route, _) in _modalRouteScopes()) route];
+
+  /// Every [ModalRoute] currently in the tree with the `_ModalScopeStatus`
+  /// element it was read from (see [_modalRoutes]).
+  List<(ModalRoute<Object?>, Element)> _modalRouteScopes() {
     final root = WidgetsBinding.instance.rootElement;
     if (root == null) return const [];
-    final routes = <ModalRoute<Object?>>[];
+    final routes = <(ModalRoute<Object?>, Element)>[];
     void visit(Element element) {
       final route = _routeOfScope(element);
-      if (route != null) routes.add(route);
+      if (route != null) routes.add((route, element));
       element.visitChildren(visit);
     }
 
@@ -93,24 +101,83 @@ extension TreeWalkerRoutes on TreeWalker {
 
   ({bool transitioning, Set<Animation<Object?>> routeAnimations})
       _transitionState() {
-    var transitioning = false;
+    final state = _scanTransitions();
+    return (
+      transitioning: state.moving != null,
+      routeAnimations: state.animations,
+    );
+  }
+
+  /// Why a tap must not be dispatched right now: a route transition is in
+  /// progress (see [isTransitioning]) — the page, dialog or sheet it moves
+  /// is sliding or fading, so a tap could land on a widget that is not
+  /// where it was measured, or on a page that is about to cover it. Null
+  /// when no route moves. The reason names what moves, e.g. `a page
+  /// transition is in progress (/checkout opening)`. Read-only: the caller
+  /// refuses and the engine re-tries the step until the transition ends.
+  String? transitionRefusal() {
+    final moving = _scanTransitions().moving;
+    return moving == null ? null : 'a $moving is in progress';
+  }
+
+  /// One pass over the routes: every route animation (so content
+  /// animations derived from them are not counted as content), and the
+  /// first route transition that is moving, described for a person — or
+  /// null when none is.
+  ///
+  /// A route in a part of the tree that is not showing is never moving:
+  /// under `TickerMode(enabled: false)` (an inactive `CupertinoTabScaffold`
+  /// tab, a go_router shell branch, an offstage overlay entry) or an
+  /// active `Offstage`. Its ticker is muted there, but a muted ticker stays
+  /// active, so a push or pop started in a hidden tab reads as "animating"
+  /// until the tab is shown again — and would block every tap meanwhile.
+  ({String? moving, Set<Animation<Object?>> animations}) _scanTransitions() {
+    String? moving;
+    var anyMoving = false;
     final animations = <Animation<Object?>>{};
-    for (final route in _modalRoutes()) {
+    for (final (route, scope) in _modalRouteScopes()) {
       final primary = route.animation;
       final secondary = route.secondaryAnimation;
-      if (primary != null) {
-        animations.add(primary);
-        if (primary.isAnimating) transitioning = true;
-      }
-      if (secondary != null) {
-        animations.add(secondary);
-        if (secondary.isAnimating) transitioning = true;
-      }
-      if (route.navigator?.userGestureInProgress ?? false) {
-        transitioning = true;
+      if (primary != null) animations.add(primary);
+      if (secondary != null) animations.add(secondary);
+      if (moving != null || _isMuted(scope)) continue;
+      final gesture = route.navigator?.userGestureInProgress ?? false;
+      if (gesture || (primary?.isAnimating ?? false)) {
+        moving = gesture ? 'back-swipe' : _transitionOf(route, primary!);
+      } else if (secondary?.isAnimating ?? false) {
+        // The route under one that opens or closes: it moves too, but the
+        // route whose own animation runs names the transition better.
+        anyMoving = true;
       }
     }
-    return (transitioning: transitioning, routeAnimations: animations);
+    if (moving == null && anyMoving) moving = 'route transition';
+    return (moving: moving, animations: animations);
+  }
+
+  /// What [route], whose own animation runs, is doing: `page transition
+  /// (/checkout opening)`, `popup (dialog, sheet or menu) transition
+  /// (closing)`.
+  String _transitionOf(ModalRoute<Object?> route, Animation<double> primary) {
+    final direction =
+        primary.status == AnimationStatus.reverse ? 'closing' : 'opening';
+    final kind = route is PopupRoute ? 'popup (dialog, sheet or menu)' : 'page';
+    final name = route.settings.name;
+    final named = name == null || name.isEmpty ? '' : '$name ';
+    return '$kind transition ($named$direction)';
+  }
+
+  /// Whether [scope] sits where nothing animates for the user: under a
+  /// `TickerMode(enabled: false)` or an active `Offstage`. The `TickerMode`
+  /// widget is read off the ancestors (no dependency registered, and no
+  /// `TickerMode.of`, deprecated after Flutter 3.35).
+  bool _isMuted(Element scope) {
+    var muted = false;
+    scope.visitAncestorElements((ancestor) {
+      final widget = ancestor.widget;
+      if (widget is TickerMode && !widget.enabled) muted = true;
+      return !muted;
+    });
+    return muted || _isOffstage(scope);
   }
 
   /// The [Animation] driving [widget], if it is an animation-driven widget:

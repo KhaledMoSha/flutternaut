@@ -11,6 +11,7 @@ import 'tree_walker.dart';
 
 part 'scroll_resolver.dart';
 part 'reveal.dart';
+part 'hit_gate.dart';
 
 /// Dispatches synthetic gestures through Flutter's [GestureBinding].
 ///
@@ -21,7 +22,8 @@ part 'reveal.dart';
 /// Swipes, and which scrollable a swipe acts on, are the
 /// [GestureDispatcherScroll] extension (`scroll_resolver.dart`, a part); the
 /// scroll that brings a target into view before a gesture is
-/// [GestureDispatcherReveal] (`reveal.dart`, a part).
+/// [GestureDispatcherReveal] (`reveal.dart`, a part); the gate every
+/// tap-like gesture passes is [GestureDispatcherHitGate] (`hit_gate.dart`).
 class GestureDispatcher {
   /// The tree walker used to resolve elements by key or text.
   final TreeWalker walker;
@@ -72,13 +74,14 @@ class GestureDispatcher {
       walker.probeTapAt(point).target ?? 'unknown widget';
 
   /// Taps the global logical point [at] — the explicit coordinate tap, for
-  /// a target no locator can address. The point is still gated: off the
-  /// screen, where no widget receives pointers (a route transition in
-  /// progress, empty space), or where a layer swallows the pointer before
+  /// a target no locator can address. The point is still gated: while a
+  /// route transition runs, off the screen, where no widget receives
+  /// pointers (empty space), or where a layer swallows the pointer before
   /// anything handles it (an `AbsorbPointer` splash), throws [ActionFailure]. Returns a description
   /// of the widget the tap reached, so the caller can confirm it hit what
   /// it meant to.
   Future<String> tapAt(Offset at) async {
+    _refuseWhileTransitioning(at);
     final probe = walker.probeTapAt(at);
     if (probe.offScreen) {
       throw ActionFailure(
@@ -87,9 +90,8 @@ class GestureDispatcher {
     }
     if (probe.pointersIgnored) {
       throw ActionFailure(
-        'No widget receives pointers at ${_fmtOffset(at)}: either nothing '
-        'is there, or a route transition is in progress (Flutter ignores '
-        'pointers until it ends — run wait_idle, then retry).',
+        'No widget receives pointers at ${_fmtOffset(at)}: nothing there '
+        'takes a tap.',
       );
     }
     final absorbedBy = probe.absorbedBy;
@@ -319,15 +321,17 @@ class GestureDispatcher {
     return reached;
   }
 
-  /// Taps a widget [count] times with [intervalMs] between each tap.
+  /// Taps a widget [count] times with [intervalMs] between each tap. The
+  /// target passes the same gate as [tap] ([resolveActable]): a missing,
+  /// ambiguous or occluded target, or a route transition in progress,
+  /// throws [ActionFailure] before the first pointer goes down.
   Future<bool> multiTap({
     String? key,
     String? text,
     int count = 2,
     int intervalMs = 100,
   }) async {
-    final center = _centerOf(_resolve(key: key, text: text));
-    if (center == null) return false;
+    final center = await resolveActable(key: key, text: text);
 
     for (var i = 0; i < count; i++) {
       final session = _beginPointer(center);
@@ -533,35 +537,6 @@ class GestureDispatcher {
     if (text != null) return walker.findAllElementsByTextMatch(text, match);
     if (semantics != null) return walker.findAllElementsBySemantics(semantics);
     return const [];
-  }
-
-  /// Confirms the matched [element] is tappable, returning the point to tap,
-  /// or throwing [ActionFailure] saying why not ([TreeWalkerTap.tapReach]).
-  /// The engine re-tries a refused step for its timeout: a refusal naming a
-  /// passing state (a splash, a scroll, a navigation) resolves on its own.
-  Offset _confirmHittable(Element element, String desc) {
-    switch (walker.tapReach(element)) {
-      case TapReachable(:final point):
-        return point;
-      case TapRefused(:final refusal, :final blocker, :final center):
-        final at = center == null ? '' : ' at ${_fmtOffset(center)}';
-        throw ActionFailure(switch (refusal) {
-          TapRefusal.notLaidOut =>
-            '$desc exists but has no on-screen geometry (not laid out).',
-          TapRefusal.offScreen => '$desc is present$at but not on screen: '
-              'it is $blocker.',
-          TapRefusal.nothingHit =>
-            '$desc is present$at but no widget receives pointers there right '
-                'now: a route transition is in progress and Flutter ignores '
-                'pointer events until it ends. Run wait_idle, then retry.',
-          TapRefusal.covered => '$desc is present$at but a tap there would '
-              'reach $blocker instead — it is occluded or off-screen.',
-          TapRefusal.hiddenRoute => '$desc $blocker.',
-          TapRefusal.inputBlocked => '$desc is visible$at but takes no taps '
-              'right now: $blocker swallows the pointer before it gets '
-              'there.',
-        });
-    }
   }
 
   /// How a locator reads in a failure message. A text locator names its

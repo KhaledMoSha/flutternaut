@@ -573,10 +573,10 @@ void main() {
     });
 
     testWidgets(
-        'a point where no widget receives pointers fails and points '
-        'at wait_idle', (tester) async {
-      // Nothing hit-testable: the pointer would reach only the RenderView,
-      // exactly as it does while every route ignores pointers.
+        'a point where no widget receives pointers fails, saying nothing '
+        'takes a tap there', (tester) async {
+      // Nothing hit-testable: the pointer would reach only the RenderView.
+      // (A route transition is refused before this, naming it.)
       await tester.pumpWidget(const Directionality(
         textDirection: TextDirection.ltr,
         child: SizedBox.expand(),
@@ -587,7 +587,10 @@ void main() {
         throwsA(isA<ActionFailure>().having(
           (e) => e.message,
           'message',
-          contains('wait_idle'),
+          allOf(
+            contains('No widget receives pointers at (200.0, 300.0)'),
+            isNot(contains('wait_idle')),
+          ),
         )),
       );
     });

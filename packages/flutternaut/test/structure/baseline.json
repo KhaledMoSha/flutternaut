@@ -2,5 +2,5 @@
   "func:lib/src/bridge/engine/tree_walker.dart.TreeWalkerControls.resolveStateTarget": 81,
   "func:lib/src/bridge/engine/tree_walker.dart.TreeWalkerDump.dumpVisibleTree": 107,
   "global:lib/src/bridge/flutternaut_bridge.dart.FlutternautBridge._instance": 1,
-  "type:lib/src/bridge/engine/gesture_dispatcher.dart.GestureDispatcher": 703
+  "type:lib/src/bridge/engine/gesture_dispatcher.dart.GestureDispatcher": 676
 }

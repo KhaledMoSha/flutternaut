@@ -58,9 +58,13 @@ enum TapRefusal {
   /// by the view it scrolls in (a page of a `PageView` that is not showing).
   offScreen,
 
-  /// Nothing but the view receives pointers at the target: a route
-  /// transition is in progress (every route scope ignores pointers).
+  /// Nothing but the view receives pointers at the target.
   nothingHit,
+
+  /// A route transition is in progress ([TreeWalkerRoutes.transitionRefusal]):
+  /// no tap-like gesture is dispatched until it ends. `blocker` is the whole
+  /// reason (`a page transition (/checkout opening) is in progress`).
+  transitioning,
 
   /// Something painted over the target would take the tap.
   covered,

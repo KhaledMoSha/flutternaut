@@ -1079,8 +1079,8 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // Pop and act while the outgoing route is still sliding away: every
-      // route scope ignores pointers, so the framework would drop the tap.
+      // Pop and act while the outgoing route is still sliding away: no tap
+      // is dispatched while a route transition runs (protocol 1.11.0).
       nav.currentState!.pop();
       await tester.pump(const Duration(milliseconds: 30));
 
@@ -1089,7 +1089,10 @@ void main() {
         throwsA(isA<ActionFailure>().having(
           (e) => e.message,
           'message',
-          allOf(contains('route transition'), contains('wait_idle')),
+          allOf(
+            contains('a page transition (closing) is in progress'),
+            contains('a tap waits for it to end'),
+          ),
         )),
       );
       expect(tapped, isFalse);
@@ -1834,9 +1837,14 @@ void main() {
       await tester.pumpAndSettle();
 
       // A navigation between frames: Navigator._cancelActivePointers sets
-      // its AbsorbPointer until the next build.
-      unawaited(nav.currentState!.push(MaterialPageRoute<void>(
-        builder: (_) => const Scaffold(body: Text('details')),
+      // its AbsorbPointer until the next build. The route has no transition
+      // (one that animates is refused as a transition first) and is not
+      // opaque (the page under an opaque one is refused as hidden first).
+      unawaited(nav.currentState!.push(PageRouteBuilder<void>(
+        opaque: false,
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        pageBuilder: (_, __, ___) => const SizedBox.shrink(),
       )));
 
       await expectLater(

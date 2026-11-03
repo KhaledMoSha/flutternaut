@@ -74,35 +74,8 @@ extension TreeWalkerTap on TreeWalker {
         blocker: 'nothing (the target is not attached to a view)',
       );
     }
-    // On a page another route hides: not on screen for the user, whatever
-    // the hit test says about what the top page paints over it.
-    final hiddenRoute = hiddenRouteRefusal(element);
-    if (hiddenRoute != null) {
-      return TapRefused(TapRefusal.hiddenRoute,
-          center: center, blocker: hiddenRoute);
-    }
-    // Wholly outside the screen, clipped away by its scroll view, or showing
-    // less than a logical pixel of itself ([_showsEnough]) while no route
-    // transition runs: no point a person could aim at is left (a hit test
-    // outside the view or a clip reaches nothing), and saying "nothing
-    // receives pointers — a transition" would send the reader to wait for
-    // one that never ends. Typical: a page of a PageView that is not showing
-    // (a debug overlay's hidden page, or its 0.00002 px remainder at the
-    // screen's edge). During a transition a target sliding through the edge
-    // is the transition's doing, and that verdict below stands.
-    final screen = _screenSize;
-    if (!_showsEnough(_visibleRect(element, screen)) && !isTransitioning) {
-      final where = screen == null
-          ? 'outside the screen'
-          : 'outside the ${_fmtSize(screen)} screen';
-      return TapRefused(
-        TapRefusal.offScreen,
-        center: center,
-        blocker: '$where, clipped away by the view it scrolls in, or shows '
-            'under 1 px of itself — it is on a page or part of a list that '
-            'is not showing',
-      );
-    }
+    final before = _refusalBeforeHitTest(element, center);
+    if (before != null) return before;
 
     final points = [center, ..._samplePoints(element).skip(1)];
     final hits = [for (final point in points) _hitTest(root, point)];
@@ -136,6 +109,49 @@ extension TreeWalkerTap on TreeWalker {
     final refusal = verdict.refusal ??
         (verdict.ancestorTook ? TapRefusal.inputBlocked : TapRefusal.covered);
     return TapRefused(refusal, center: center, blocker: verdict.blocker());
+  }
+
+  /// The refusals [tapReach] decides before any hit test, in order: a route
+  /// transition in progress, a page another route hides, a target with no
+  /// point on screen. Null when none applies.
+  TapRefused? _refusalBeforeHitTest(Element element, Offset center) {
+    // A route transition is in progress: the page under the pointer is
+    // still sliding or fading, and a page opening takes pointers (Flutter
+    // ignores them only on a closing route). No tap-like gesture is
+    // dispatched until it ends; the engine re-tries the step meanwhile.
+    final transition = transitionRefusal();
+    if (transition != null) {
+      return TapRefused(TapRefusal.transitioning,
+          center: center, blocker: transition);
+    }
+    // On a page another route hides: not on screen for the user, whatever
+    // the hit test says about what the top page paints over it.
+    final hiddenRoute = hiddenRouteRefusal(element);
+    if (hiddenRoute != null) {
+      return TapRefused(TapRefusal.hiddenRoute,
+          center: center, blocker: hiddenRoute);
+    }
+    // Wholly outside the screen, clipped away by its scroll view, or showing
+    // less than a logical pixel of itself ([_showsEnough]): no point a
+    // person could aim at is left (a hit test outside the view or a clip
+    // reaches nothing). Typical: a page of a PageView that is not showing
+    // (a debug overlay's hidden page, or its 0.00002 px remainder at the
+    // screen's edge). No transition runs here (refused above), so this is
+    // never a target merely sliding through the edge.
+    final screen = _screenSize;
+    if (!_showsEnough(_visibleRect(element, screen))) {
+      final where = screen == null
+          ? 'outside the screen'
+          : 'outside the ${_fmtSize(screen)} screen';
+      return TapRefused(
+        TapRefusal.offScreen,
+        center: center,
+        blocker: '$where, clipped away by the view it scrolls in, or shows '
+            'under 1 px of itself — it is on a page or part of a list that '
+            'is not showing',
+      );
+    }
+    return null;
   }
 
   /// Hit-tests [root] at the global logical [point].
@@ -212,8 +228,9 @@ extension TreeWalkerTap on TreeWalker {
   /// reports needs it); `ancestorTook` is true when the frontmost hit is an
   /// ancestor of [target] (the pointer stopped before reaching it).
   ///
-  ///  1. Only the [RenderView] is hit → [TapRefusal.nothingHit] (a route
-  ///     transition, every route scope ignoring pointers).
+  ///  1. Only the [RenderView] is hit → [TapRefusal.nothingHit] (nothing
+  ///     takes pointers there; a route transition is refused before this,
+  ///     by [tapReach]).
   ///  2. The frontmost hit is in another branch, painted over the label →
   ///     [TapRefusal.covered]; when it paints nothing (a
   ///     `Positioned.fill(InkWell)` over a card, an empty field under its
@@ -308,7 +325,8 @@ extension TreeWalkerTap on TreeWalker {
   /// What a tap at the global logical [point] would reach right now — the
   /// gate for a coordinate tap (`tap_at`). `offScreen` when the point lies
   /// outside the view; `pointersIgnored` when nothing but the [RenderView]
-  /// is hit (mid route transition, or empty space); `absorbedBy` names a
+  /// is hit (empty space; a route transition is refused before the probe,
+  /// by the caller); `absorbedBy` names a
   /// layer that swallows the pointer before anything handles it (an
   /// `AbsorbPointer` splash, the Navigator right after a navigation) unless
   /// a tap handler wraps it ([_handlerWraps]); otherwise `target` describes

@@ -152,7 +152,20 @@ class HealthHandler {
   /// instead of reporting a tap that ran the other handler. A covered
   /// target is revealed centred, not at the leading edge it was covered at.
   /// Visibility is unchanged (seen is not tappable). No route changes.
-  static const String protocolVersion = '1.10.1';
+  ///
+  /// 1.11.0 — **no tap while a navigation is in progress.** Every tap-like
+  /// gesture (`/tap`, `/long_press`, `/multi_tap`, `/tap_at`, a `near` tap,
+  /// the focusing tap of `/type` and `/clear_text`) is refused while a route
+  /// transition runs — a page push or pop, a dialog, sheet or menu opening
+  /// or closing, a back-swipe — naming it (`a page transition (/checkout
+  /// opening) is in progress — a tap waits for it to end`); nothing is
+  /// dispatched and the engine re-tries the step. Flutter ignores pointers
+  /// only on a closing route, so a tap on a page sliding in used to land
+  /// mid-animation. A route in a part of the tree that is not showing (an
+  /// inactive tab, an offstage overlay entry) never counts as moving, for
+  /// this, `/wait_for_idle` and the dump's `animating`. `/multi_tap` passes
+  /// the full tap gate (an occluded target is refused). No route changes.
+  static const String protocolVersion = '1.11.0';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

@@ -11,7 +11,8 @@ extension GestureDispatcherReveal on GestureDispatcher {
   /// Two rules keep this from moving the screen under the test:
   ///
   ///  * A reachable target is left where it is; so is a blocked or hidden one
-  ///    ([TapRefusal.inputBlocked], [TapRefusal.hiddenRoute]). A covered one
+  ///    ([TapRefusal.inputBlocked], [TapRefusal.hiddenRoute]) and one whose
+  ///    page is mid transition ([TapRefusal.transitioning]). A covered one
   ///    is centred, not put at the leading edge it was covered at (the iOS
   ///    status-bar tap area over a row scrolled to the top).
   ///  * Only ancestors the **user** could scroll are scrolled. An ancestor
@@ -27,10 +28,12 @@ extension GestureDispatcherReveal on GestureDispatcher {
     switch (walker.tapReach(target)) {
       case TapReachable():
         return;
-      // Blocked (a list still scrolling) or on a hidden page: scrolling would
-      // move a screen nobody acts on; the gate refuses and the step re-tries.
+      // Blocked (a list still scrolling), on a hidden page, or mid route
+      // transition (the page is still sliding in): scrolling would move a
+      // screen nobody acts on yet; the gate refuses and the step re-tries.
       case TapRefused(refusal: TapRefusal.inputBlocked):
       case TapRefused(refusal: TapRefusal.hiddenRoute):
+      case TapRefused(refusal: TapRefusal.transitioning):
         return;
       case TapRefused(:final refusal):
         alignment = refusal == TapRefusal.covered ? 0.5 : 0.0;
