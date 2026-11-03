@@ -87,18 +87,10 @@ extension TreeWalkerDump on TreeWalker {
           if (semantics != null) node['semantics'] = semantics;
           final semanticsId = semanticsIdOf(element);
           if (semanticsId != null) node['semantics_id'] = semanticsId;
-          final rect = _visibleRect(element, screen);
-          if (rect != null) {
-            node['rect'] = ElementRect(
-              x: rect.left,
-              y: rect.top,
-              width: rect.width,
-              height: rect.height,
-            ).toJson();
-          }
+          _addRect(element, node, screen);
+          _addFieldName(element, node);
           if (coverage == _Coverage.partial) node['partial'] = true;
-          final enabled = dumpState(element);
-          if (enabled != null) node['enabled'] = enabled;
+          _addControlState(element, node);
           if (info.checked != null) node['checked'] = info.checked;
           nthIndex.annotate(element, node, nodeText, semantics, semanticsId);
           if (widget is Scrollable) {
@@ -134,6 +126,63 @@ extension TreeWalkerDump on TreeWalker {
       'animations': runningAnimations(),
       'elements': elements,
     };
+  }
+
+  /// The element's visible rect on its node.
+  void _addRect(Element element, Map<String, dynamic> node, Size? screen) {
+    final rect = _visibleRect(element, screen);
+    if (rect == null) return;
+    node['rect'] = ElementRect(
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+    ).toJson();
+  }
+
+  /// A text field's name on its node (`field_name`, [fieldNameOf]): the
+  /// label, hint or placeholder drawn inside it, which a text locator still
+  /// names once the field is filled and its value — the node's `text` — is
+  /// no longer drawn text (bridge protocol 1.10.0). One node per field
+  /// carries it: the [EditableText] node when the field holds a value (that
+  /// node carries the value as `text`), else the [TextField] /
+  /// [CupertinoTextField] node (an empty [EditableText] is no node of its
+  /// own, see [_isRedundant]).
+  void _addFieldName(Element element, Map<String, dynamic> node) {
+    final w = element.widget;
+    if (w is TextField || w is CupertinoTextField) {
+      final editable = _editableOf(element);
+      if (editable == null) return;
+      if ((editable.widget as EditableText).controller.text.isNotEmpty) {
+        return;
+      }
+    } else if (w is! EditableText) {
+      return;
+    }
+    final name = fieldNameOf(element);
+    if (name != null) node['field_name'] = name;
+  }
+
+  /// The state of the control that owns [element], on its node: `enabled`
+  /// (the one rule of [stateOwner] / [_elementState]) and, from the same
+  /// owner, the selection it declares ([selectionOf]): `selected` true /
+  /// false, or `mixed: true` for a tristate in its mixed state (no
+  /// `selected` then — a reader that ignores `mixed` sees no state, never
+  /// "not selected"). A node that is part of no control gets neither.
+  void _addControlState(Element element, Map<String, dynamic> node) {
+    final owner = stateOwner(element, labelOf: textRunLabel);
+    if (owner == null) return;
+    final enabled = _elementState(owner);
+    if (enabled == null) return;
+    node['enabled'] = enabled;
+    switch (selectionOf(owner)) {
+      case SelectedState(:final value):
+        node['selected'] = value;
+      case MixedState():
+        node['mixed'] = true;
+      case NoSelection():
+        break;
+    }
   }
 
   /// Whether [element] would only duplicate an ancestor already in the dump —

@@ -13,6 +13,7 @@ part 'tree_walker/coverage.dart';
 part 'tree_walker/routes.dart';
 part 'tree_walker/labels.dart';
 part 'tree_walker/controls.dart';
+part 'tree_walker/selection.dart';
 part 'tree_walker/semantics.dart';
 part 'tree_walker/near.dart';
 part 'tree_walker/visibility.dart';
@@ -20,6 +21,7 @@ part 'tree_walker/scroll.dart';
 part 'tree_walker/blockers.dart';
 part 'tree_walker/tap.dart';
 part 'tree_walker/fields.dart';
+part 'tree_walker/field_name.dart';
 part 'tree_walker/find.dart';
 part 'tree_walker/dump.dart';
 

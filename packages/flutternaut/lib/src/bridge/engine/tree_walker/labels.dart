@@ -28,6 +28,16 @@ extension TreeWalkerLabels on TreeWalker {
     return null;
   }
 
+  /// The text [w] draws for a person to read — a [Text], `Text.rich`,
+  /// [RichText] — and never what a text field holds: an [EditableText]'s
+  /// value is user data (what was typed, or prefilled), not text the app
+  /// shows, so no text locator matches it and no control is labelled by it.
+  /// This is the text every finder, the visibility checks, the near anchors
+  /// and the dump's `text_nth` compare against (bridge protocol 1.10.0);
+  /// [_widgetOwnText] still reads the value for the dump's `text` and for
+  /// [extractText] (`/get_text`, `/read`).
+  String? _drawnText(Widget w) => w is EditableText ? null : _widgetOwnText(w);
+
   /// Whether [s] contains any letter or digit — glyph "labels"
   /// (private-use code points) do not count as readable text.
   bool _hasAlnum(String s) =>
@@ -125,7 +135,9 @@ extension TreeWalkerLabels on TreeWalker {
       if (worded != null) return;
       final w = child.widget;
       if (_isLabelBoundary(w) || layers.hidesScope(child)) return;
-      final own = _widgetOwnText(w);
+      // Drawn text only: a tap surface around a filled field is not named
+      // by what was typed into it.
+      final own = _drawnText(w);
       if (own != null) {
         // A text the user cannot see is no label; its subtree is the same
         // text's render machinery, so the search moves on to its siblings.

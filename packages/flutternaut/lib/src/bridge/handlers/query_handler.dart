@@ -3,7 +3,8 @@ import '../engine/tree_walker.dart';
 import '../router.dart';
 import '_locator.dart';
 
-/// Handles query endpoints: read, get_text, is_visible, is_enabled.
+/// Handles query endpoints: read, get_text, is_visible, is_enabled,
+/// is_selected.
 class QueryHandler {
   final TreeWalker _walker;
   final MainThreadRunner _runner;
@@ -17,6 +18,7 @@ class QueryHandler {
     router.post('/get_text', _getText);
     router.post('/is_visible', _isVisible);
     router.post('/is_enabled', _isEnabled);
+    router.post('/is_selected', _isSelected);
   }
 
   Future<Map<String, dynamic>> _read(BridgeRequest req) async {
@@ -76,6 +78,45 @@ class QueryHandler {
         StateMissing(:final reason) => {'found': false, 'reason': reason},
         final StateNotAControl notAControl => {
             'found': false,
+            'reason': notAControl.reason,
+          },
+      };
+    });
+  }
+
+  /// The selection state of the control the locator names (the control
+  /// [TreeWalkerControls.resolveStateTarget] picks, read by
+  /// [TreeWalkerSelection.selectionOf]): `found` with `selected` (true /
+  /// false) or `mixed: true`, and `control`; `found: false` with the
+  /// `reason` — retryable when nothing matches right now, `final` when the
+  /// locator names no control or a control that declares no selection.
+  Future<Map<String, dynamic>> _isSelected(BridgeRequest req) async {
+    req.requireLocator();
+    return _runner.run<Map<String, dynamic>>(() {
+      return switch (resolveStateLocator(req, _walker)) {
+        StateFound(:final control, :final description) => switch (
+              _walker.selectionOf(control)) {
+            SelectedState(:final value) => {
+                'found': true,
+                'selected': value,
+                'control': description,
+              },
+            MixedState() => {
+                'found': true,
+                'mixed': true,
+                'control': description,
+              },
+            NoSelection() => {
+                'found': false,
+                'final': true,
+                'control': description,
+                'reason': _walker.notSelectableReason(control),
+              },
+          },
+        StateMissing(:final reason) => {'found': false, 'reason': reason},
+        final StateNotAControl notAControl => {
+            'found': false,
+            'final': true,
             'reason': notAControl.reason,
           },
       };

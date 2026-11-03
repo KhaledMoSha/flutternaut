@@ -108,6 +108,7 @@ extension TreeWalkerControls on TreeWalker {
     if (w is Switch) return w.onChanged != null;
     if (w is Checkbox) return w.onChanged != null;
     if (w is CupertinoSwitch) return w.onChanged != null;
+    if (w is CupertinoCheckbox) return w.onChanged != null;
     if (w is Slider) return w.onChanged != null;
     if (w is CupertinoSlider) return w.onChanged != null;
     if (w is DropdownButton) return w.onChanged != null;
@@ -123,8 +124,13 @@ extension TreeWalkerControls on TreeWalker {
   /// is none of the controls [_ownState] knows. Its state lives on the
   /// inner `InkWell`/`GestureDetector` it builds, where a nulled `onTap` is
   /// the disabled signal (a `PrimaryCButton` dims and sets `onTap: null`).
+  /// A `Radio` / `CupertinoRadio` is read the same way: whether it reacts
+  /// depends on its group, and shows on the detector it builds.
   bool _isNamedButton(Widget w) =>
-      _ownState(w) == null && w.runtimeType.toString().endsWith('Button');
+      _ownState(w) == null &&
+      (w is Radio ||
+          w is CupertinoRadio ||
+          w.runtimeType.toString().endsWith('Button'));
 
   /// The tap state of a generic tap surface (`InkWell`/`InkResponse`,
   /// `GestureDetector`): enabled when it has a tap-like callback; disabled
@@ -259,7 +265,10 @@ extension TreeWalkerControls on TreeWalker {
         final isSpecific = _isSpecificControl(a);
         final surface = _genericTapState(w) != null;
         if (!isSpecific && !surface && !_isMeaningful(a)) return true;
-        if (labelOf(a) != label) return false;
+        // A keyed wrapper with no label of its own (a `LayoutId`, a keyed
+        // `Padding`) is not a different label: the run goes on through it.
+        final aLabel = labelOf(a);
+        if (aLabel != null && aLabel != label) return false;
         if (isSpecific) {
           specific = a;
           return false;
@@ -300,14 +309,44 @@ extension TreeWalkerControls on TreeWalker {
   /// it shows (what the dump labels its node with). Normalized like every
   /// text match.
   String? textRunLabel(Element element) {
-    final own = _widgetOwnText(element.widget);
-    if (own != null) return TreeWalker.normalizeText(own);
+    final own = _drawnText(element.widget);
+    if (own != null) {
+      final text = TreeWalker.normalizeText(own);
+      return text.isEmpty ? null : text;
+    }
     final w = element.widget;
     if (_elementState(element) != null || _isButtonLike(w) || w is ListTile) {
-      final text = extractText(element);
-      return text == null ? null : TreeWalker.normalizeText(text);
+      return _runText(element);
     }
     return null;
+  }
+
+  /// The text that names [element]'s control in a label run: the first
+  /// descendant text with a letter, else the first non-empty text — the
+  /// preference a dump node's label has ([_subtreeLabel]), so a navigation
+  /// destination whose icon glyph comes before its caption is named by the
+  /// caption, and the caption's run reaches the destination.
+  String? _runText(Element element) {
+    String? first;
+    String? worded;
+    void visit(Element child) {
+      if (worded != null) return;
+      final w = child.widget;
+      if (_isLabelBoundary(w)) return;
+      final own = _drawnText(w);
+      if (own != null) {
+        final text = TreeWalker.normalizeText(own);
+        if (text.isNotEmpty) {
+          first ??= text;
+          if (_hasLetter(text)) worded = text;
+        }
+        return;
+      }
+      child.visitChildren(visit);
+    }
+
+    element.visitChildren(visit);
+    return worded ?? first;
   }
 
   /// The enabled state the `/screen` dump attaches to [element]'s node: the

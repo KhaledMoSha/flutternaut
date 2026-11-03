@@ -331,6 +331,10 @@ extension TreeWalkerBlockers on TreeWalker {
   String _describeHit(RenderObject ro) {
     final element = _elementOwning(ro);
     if (element == null) return ro.runtimeType.toString();
+    if (_isStatusBarTapArea(element)) {
+      return 'the status-bar tap area at the top of the screen (a tap there '
+          'scrolls a list to its top, not the widget under it)';
+    }
     final control = _controlOf(element);
     final owner = control ?? element;
     final label =
@@ -342,6 +346,33 @@ extension TreeWalkerBlockers on TreeWalker {
     if (label != null && _hasAlnum(label)) return '$name "$label"';
     if (semantics != null) return '$name (semantics "$semantics")';
     return name;
+  }
+
+  /// Whether [element] (the owner of a hit render object) belongs to the
+  /// tap detector a scaffold lays over the top safe area on iOS: the
+  /// `Scaffold`'s status-bar slot (`_ScaffoldSlot.statusBar`; opaque before
+  /// Flutter 3.41, a recognizer-less `MetaData` after) or the child-less
+  /// `GestureDetector` of a `CupertinoPageScaffold`. A widget scrolled under
+  /// it cannot be tapped — the detector takes the tap.
+  bool _isStatusBarTapArea(Element element) {
+    var found = false;
+    var hops = 0;
+    element.visitAncestorElements((ancestor) {
+      final widget = ancestor.widget;
+      if (widget is LayoutId && '${widget.id}' == '_ScaffoldSlot.statusBar') {
+        found = true;
+        return false;
+      }
+      if (widget is GestureDetector &&
+          widget.child == null &&
+          widget.excludeFromSemantics &&
+          _hasAncestorWidget<CupertinoPageScaffold>(ancestor, 8)) {
+        found = true;
+        return false;
+      }
+      return ++hops < 6;
+    });
+    return found;
   }
 
   /// Names what covers [element] at [point] for a "covered by X" reason:
@@ -358,6 +389,9 @@ extension TreeWalkerBlockers on TreeWalker {
       final claimer = _silentClaimer(top, point, stopAt: target);
       if (claimer != null) return _describeBlocker(claimer);
     }
+    // Another control's tap handler (the iOS status-bar tap area) is named
+    // as a person knows it, not by its render object's type.
+    if (_isTapHandler(top)) return _describeHit(top);
     return top.runtimeType.toString();
   }
 }

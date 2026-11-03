@@ -26,14 +26,17 @@ TextMatch textMatchOf(BridgeRequest req) {
 
 /// Resolves an element by the `key`, `text` or `semantics` locator field on
 /// [req]. `text` honours `match` (see [textMatchOf]); an unknown `match` is
-/// rejected whichever locator is present. Returns null if no locator is
-/// present or nothing matches.
+/// rejected whichever locator is present. A `text` that names a field (its
+/// label, hint or placeholder) resolves to the field, so `/get_text`,
+/// `/read` and `/wait_for_text` answer with the field's value
+/// ([TreeWalkerFieldName.findReadableByTextMatch]); a field is never found
+/// by its value. Returns null if no locator is present or nothing matches.
 ElementInfo? resolveLocator(BridgeRequest req, TreeWalker walker) {
   final match = textMatchOf(req);
   final key = req.string('key');
   if (key != null) return walker.findByKey(key);
   final text = req.string('text');
-  if (text != null) return walker.findByTextMatch(text, match);
+  if (text != null) return walker.findReadableByTextMatch(text, match);
   final semantics = req.string('semantics');
   if (semantics != null) return walker.findBySemantics(semantics);
   return null;

@@ -106,14 +106,22 @@ extension TreeWalkerTap on TreeWalker {
 
     final points = [center, ..._samplePoints(element).skip(1)];
     final hits = [for (final point in points) _hitTest(root, point)];
+    // The control a tap on the target triggers: a point whose pointer goes
+    // to another control's tap handler first is not a tap on the target,
+    // even when the hit path reaches it (see [_foreignTapTaker]).
+    final control = _ownControlRo(element);
     for (var i = 0; i < points.length; i++) {
-      if (_pathReaches(hits[i], targetRo)) return TapReachable(points[i]);
+      if (_pathReaches(hits[i], targetRo) &&
+          (control == null ||
+              _foreignTapTaker(hits[i], targetRo, control) == null)) {
+        return TapReachable(points[i]);
+      }
     }
 
     final isLabel = !_isInteractiveWidget(element.widget);
     final verdicts = [
       for (var i = 0; i < points.length; i++)
-        _judgeLabelPoint(targetRo, root, points[i], hits[i]),
+        _judgeLabelPoint(targetRo, root, points[i], hits[i], control: control),
     ];
     if (isLabel) {
       for (var i = 0; i < points.length; i++) {
@@ -135,6 +143,42 @@ extension TreeWalkerTap on TreeWalker {
     final result = HitTestResult();
     root.hitTest(result, position: point);
     return result;
+  }
+
+  /// The render object of the control a tap on [element] triggers — its
+  /// nearest interactive ancestor-or-self ([_controlOf]) — or null when it
+  /// has none (a plain label on a card a stretched `InkWell` takes taps for).
+  RenderObject? _ownControlRo(Element element) =>
+      _controlOf(element)?.renderObject;
+
+  /// The tap handler of another control that receives the pointer of the
+  /// hit [result] before anything of [target]'s own: the first tap handler
+  /// ([_isTapHandler]) on the path ahead of the first entry inside
+  /// [control]'s subtree or on [target]'s ancestor chain. Null when none
+  /// does.
+  ///
+  /// Every tap recognizer on the path joins the gesture arena in path order
+  /// and the first one wins a plain tap, so such a handler takes the tap
+  /// whether it stops the hit test (the opaque status-bar `GestureDetector`
+  /// an iOS `Scaffold` lays over the top safe area) or lets it through to
+  /// the target (a translucent layer with its own `onTap` stacked in front,
+  /// `CupertinoPageScaffold`'s status-bar detector). Its ancestors and the
+  /// target's own control never count: they are the tap a person meant.
+  RenderObject? _foreignTapTaker(
+    HitTestResult result,
+    RenderObject target,
+    RenderObject control,
+  ) {
+    for (final entry in result.path) {
+      final hit = entry.target;
+      if (hit is! RenderObject) continue;
+      if (_isRenderAncestorOrSelf(control, hit) ||
+          _isRenderAncestorOrSelf(hit, target)) {
+        return null;
+      }
+      if (_isTapHandler(hit)) return hit;
+    }
+    return null;
   }
 
   /// Whether the hit [result] lands in [target]'s render subtree — [target]
@@ -174,6 +218,10 @@ extension TreeWalkerTap on TreeWalker {
   ///     [TapRefusal.covered]; when it paints nothing (a
   ///     `Positioned.fill(InkWell)` over a card, an empty field under its
   ///     hint) or is faded out, the tap is what a person's would be: allowed.
+  ///     Before any of this: when the label has a [control] of its own and
+  ///     another control's tap handler takes the pointer first
+  ///     ([_foreignTapTaker] — the iOS status-bar tap area over a row
+  ///     scrolled under it), the label is [TapRefusal.covered] by it.
   ///  3. The frontmost hit is an ancestor of the label → find what blocks
   ///     the label ([_silentClaimer], else [_blockerBetween]): none means
   ///     the ancestor itself takes the tap — allowed only when it is a tap
@@ -190,13 +238,23 @@ extension TreeWalkerTap on TreeWalker {
     RenderObject target,
     RenderView root,
     Offset point,
-    HitTestResult hit,
-  ) {
+    HitTestResult hit, {
+    RenderObject? control,
+  }) {
     final top = _frontmost(hit);
     if (top == null || identical(top, root)) {
       return (
         refusal: TapRefusal.nothingHit,
         blocker: () => 'nothing',
+        ancestorTook: false,
+      );
+    }
+    final foreign =
+        control == null ? null : _foreignTapTaker(hit, target, control);
+    if (foreign != null) {
+      return (
+        refusal: TapRefusal.covered,
+        blocker: () => _describeHit(foreign),
         ancestorTook: false,
       );
     }

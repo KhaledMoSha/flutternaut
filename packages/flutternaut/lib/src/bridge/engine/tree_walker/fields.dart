@@ -32,16 +32,20 @@ extension TreeWalkerFields on TreeWalker {
     return primary ?? withinScope;
   }
 
-  /// Resolves the visible label [text] to the [TextEditingController]
-  /// of its associated editable field — without relying on focus.
+  /// Resolves the label [text] to the [TextEditingController] of the
+  /// field it names — without relying on focus.
   ///
   /// Order:
-  ///   (a) the matched element is, or is inside, an [EditableText]
-  ///       (covers `InputDecoration.labelText`/`hintText` and matching
-  ///       a field by its own current text);
-  ///   (b) otherwise the label is a sibling of its field — pick the
+  ///   (a) the matched drawn text sits inside a text field — its
+  ///       `InputDecoration.labelText` / `hintText` (faded out once the
+  ///       field is filled, still its name) or a Cupertino `placeholder`
+  ///       ([_fieldNamedBy]);
+  ///   (b) otherwise the label is a caption beside its field — pick the
   ///       on-screen [EditableText] geometrically nearest below/right
   ///       of the label's rect.
+  /// A field is never found by the value it holds (bridge protocol
+  /// 1.10.0): a value changes with every keystroke, and what was typed is
+  /// not text the app shows.
   ///
   /// Returns null if no field can be confidently associated; callers
   /// must NOT fall back to the focused field (failing is safer than
@@ -73,21 +77,7 @@ extension TreeWalkerFields on TreeWalker {
   /// `EditableText`). Null if no editable descendant exists.
   Element? findEditableElementByKey(String keyValue) {
     final keyed = findElementByKey(keyValue);
-    if (keyed == null) return null;
-    if (keyed.widget is EditableText) return keyed;
-
-    Element? editable;
-    void visit(Element element) {
-      if (editable != null) return;
-      if (element.widget is EditableText) {
-        editable = element;
-        return;
-      }
-      element.visitChildren(visit);
-    }
-
-    keyed.visitChildren(visit);
-    return editable;
+    return keyed == null ? null : _editableOf(keyed);
   }
 
   /// The [EditableTextState] backing an [EditableText] [element], or null.
@@ -117,8 +107,8 @@ extension TreeWalkerFields on TreeWalker {
     }
     if (el == null) return null;
 
-    final enclosing = _enclosingEditableElement(el);
-    if (enclosing != null) return enclosing;
+    final named = _fieldNamedBy(el);
+    if (named != null) return named;
 
     final labelRect = _rectOf(el);
     if (labelRect == null) return null;
@@ -133,19 +123,45 @@ extension TreeWalkerFields on TreeWalker {
     return null;
   }
 
-  /// The [EditableText] element of [el] itself or its nearest
-  /// [EditableText] ancestor, or null.
-  Element? _enclosingEditableElement(Element el) {
-    if (el.widget is EditableText) return el;
+  /// The field a text drawn at [el] names: the [EditableText] of the
+  /// nearest [TextField] / [CupertinoTextField] ancestor (a label, hint or
+  /// placeholder is drawn inside the field's decoration), or an
+  /// [EditableText] ancestor of [el]. Null when [el] is not inside a field
+  /// — a caption beside a field names it by position instead
+  /// ([_nearestFieldElement]), a heading above one names nothing.
+  Element? _fieldNamedBy(Element el) {
     Element? found;
     el.visitAncestorElements((ancestor) {
-      if (ancestor.widget is EditableText) {
+      final w = ancestor.widget;
+      if (w is EditableText) {
         found = ancestor;
-        return false; // stop
+        return false;
+      }
+      if (w is TextField || w is CupertinoTextField) {
+        found = _editableOf(ancestor);
+        return false;
       }
       return true;
     });
     return found;
+  }
+
+  /// The [EditableText] element a field wrapper builds (its first
+  /// [EditableText] descendant), or the element itself when it is one.
+  Element? _editableOf(Element field) {
+    if (field.widget is EditableText) return field;
+    Element? editable;
+    void visit(Element element) {
+      if (editable != null) return;
+      if (element.widget is EditableText) {
+        editable = element;
+        return;
+      }
+      element.visitChildren(visit);
+    }
+
+    field.visitChildren(visit);
+    return editable;
   }
 
   /// Picks the on-screen [EditableText] element geometrically associated

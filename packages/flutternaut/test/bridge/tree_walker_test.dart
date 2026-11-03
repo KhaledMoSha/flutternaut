@@ -259,8 +259,9 @@ void main() {
         isNotNull,
       );
       expect(walker.findByTextMatch('padded', TextMatch.startsWith), isNotNull);
-      // A field's value: its leading spaces do not hide its first word.
-      expect(walker.findByTextMatch('Hello', TextMatch.startsWith), isNotNull);
+      // A field's value is not drawn text: no text locator matches it
+      // (bridge protocol 1.10.0).
+      expect(walker.findByTextMatch('Hello', TextMatch.startsWith), isNull);
     });
 
     testWidgets('exact stays case-sensitive', (tester) async {

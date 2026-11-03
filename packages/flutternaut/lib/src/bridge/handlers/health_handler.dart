@@ -108,7 +108,51 @@ class HealthHandler {
   /// on the real row once the page has loaded. A non-control the pointer
   /// reached is named with only its own text, never the first text under it.
   /// No engine gate.
-  static const String protocolVersion = '1.8.2';
+  ///
+  /// 1.9.0 — a control's selection state. A `/screen` node that carries
+  /// `enabled` also carries `selected` (true / false) when the control it
+  /// belongs to declares one, or `mixed: true` (and no `selected`) for a
+  /// tristate in its mixed state; `checked` is unchanged. The state is read
+  /// from the accessibility flags the control declares — `Semantics(checked:
+  /// | toggled: | selected: | mixed:)` inside a checkbox, switch, radio,
+  /// chip, tab, segment or navigation destination, or the wrapper an app
+  /// puts around its own row's tap surface — by one rule shared with the new
+  /// `POST /is_selected` (a `key` / `text` / `semantics` locator with `match`
+  /// and `nth`): `{found, selected | mixed, control}`, or `{found: false,
+  /// reason, final?}` when the locator names no control or one that
+  /// declares no selection. A `ListTile`'s selected highlight is not a
+  /// selection state.
+  ///
+  /// 1.10.0 — **typed text is a field's value, not text on screen.** A
+  /// `text` locator matches only text the app draws (`Text`, `RichText`:
+  /// labels, hints, rows), never what an [EditableText] holds — on every
+  /// route (`/assert_visible`, `/assert_not_visible`, `/is_visible`, the
+  /// waits, `/assert_text_equals|contains`, `/tap`, `/long_press`, the
+  /// state routes), in the dump's `text_nth`, for `near` anchors and
+  /// scroll targets, so `nth` stays one list and a value typed into a
+  /// search field can neither satisfy an `expect_visible` nor block an
+  /// `expect_not_visible` on the results. A field is named by its key, by
+  /// the text drawn inside it (`labelText` / `hintText` / `placeholder`,
+  /// still its name once faded) or by a caption beside it; `/type` and
+  /// `/clear_text` no longer find a field by its value. A field's node
+  /// carries `field_name` (that inner text, when it resolves back to the
+  /// field alone), so a filled field keeps the locator it had when empty;
+  /// `/get_text`, `/read`, `/wait_for_text`, `/find`, `/assert_exists`
+  /// answer for the field when a `text` locator names it. A `text_nth`
+  /// recorded against an older package can shift down by one where a
+  /// field echoed a row.
+  ///
+  /// 1.10.1 — **a tap goes to the control the step names, or is refused.**
+  /// When another control's tap handler takes the pointer before the
+  /// target's own control — the opaque status-bar tap area an iOS
+  /// `Scaffold` lays over the top safe area before Flutter 3.41, a
+  /// translucent layer with its own `onTap` stacked in front (it wins the
+  /// gesture arena) — the tap gate refuses the target as covered, naming
+  /// that handler ("the status-bar tap area at the top of the screen …"),
+  /// instead of reporting a tap that ran the other handler. A covered
+  /// target is revealed centred, not at the leading edge it was covered at.
+  /// Visibility is unchanged (seen is not tappable). No route changes.
+  static const String protocolVersion = '1.10.1';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;

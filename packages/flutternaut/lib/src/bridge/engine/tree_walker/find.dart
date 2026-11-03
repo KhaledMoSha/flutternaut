@@ -8,19 +8,19 @@ extension TreeWalkerFind on TreeWalker {
         (element) => TreeWalker.keyOf(element.widget) == keyValue);
   }
 
-  /// The one text predicate behind every text finder: whether an
-  /// element's own text ([_widgetOwnText]) matches the locator [text] in
-  /// [match] mode.
+  /// The one text predicate behind every text finder: whether the text an
+  /// element draws ([_drawnText] — never a text field's value) matches the
+  /// locator [text] in [match] mode. Every route, the visibility checks,
+  /// the near anchors and the dump's `text_nth` share it, so `nth` indexes
+  /// one list everywhere and a typed value can neither satisfy
+  /// `expect_visible` nor block `expect_not_visible`.
   ///
   /// The locator is normalized once, here, rather than per element.
-  ///  * [TextMatch.exact] — `own == normalizeText(text)`, case-sensitive.
-  ///    The own text is compared as [_widgetOwnText] returns it, so a
-  ///    field's value still has to equal the locator verbatim.
+  ///  * [TextMatch.exact] — `drawn == normalizeText(text)`, case-sensitive
+  ///    (drawn text is already normalized).
   ///  * [TextMatch.contains] / [TextMatch.startsWith] — both sides
-  ///    normalized and lower-cased. Normalizing the field value too means
-  ///    a value with surrounding spaces still starts with its first word;
-  ///    normalizing the locator means `" Log in "` and `"Log in"` are the
-  ///    same needle, as they already are for exact.
+  ///    lower-cased; normalizing the locator means `" Log in "` and
+  ///    `"Log in"` are the same needle, as they already are for exact.
   bool Function(Element) _textMatcher(String text, TextMatch match) {
     final needle = TreeWalker.normalizeText(text);
     // An empty needle is a prefix and a substring of every text: a contains
@@ -34,7 +34,7 @@ extension TreeWalkerFind on TreeWalker {
     }
     switch (match) {
       case TextMatch.exact:
-        return (element) => _widgetOwnText(element.widget) == needle;
+        return (element) => _drawnText(element.widget) == needle;
       case TextMatch.contains:
         final lower = needle.toLowerCase();
         return (element) => _foldedOwnText(element)?.contains(lower) ?? false;
@@ -44,17 +44,17 @@ extension TreeWalkerFind on TreeWalker {
     }
   }
 
-  /// [element]'s own text normalized and lower-cased — the haystack of the
+  /// The text [element] draws, lower-cased — the haystack of the
   /// case-insensitive modes (see [_textMatcher]); null when the widget
-  /// carries no text of its own.
+  /// draws no text of its own (a field's value is not drawn text).
   String? _foldedOwnText(Element element) {
-    final own = _widgetOwnText(element.widget);
-    return own == null ? null : TreeWalker.normalizeText(own).toLowerCase();
+    final drawn = _drawnText(element.widget);
+    return drawn?.toLowerCase();
   }
 
   /// Finds the first text-bearing widget ([Text], `Text.rich`,
-  /// [RichText], [EditableText]) whose visible text matches [text]
-  /// exactly.
+  /// [RichText] — never a field by its value) whose drawn text matches
+  /// [text] exactly.
   ElementInfo? findByText(String text) =>
       findByTextMatch(text, TextMatch.exact);
 

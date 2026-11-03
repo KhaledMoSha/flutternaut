@@ -45,9 +45,9 @@ void main() {
       expect(router.routeCount, 10);
     });
 
-    test('QueryHandler registers 4 routes', () {
+    test('QueryHandler registers 5 routes', () {
       QueryHandler(walker: walker, runner: runner).register(router);
-      expect(router.routeCount, 4);
+      expect(router.routeCount, 5);
     });
 
     test('AssertHandler registers 8 routes', () {
@@ -80,8 +80,8 @@ void main() {
     WaitHandler(walker: walker, runner: runner).register(router);
     AppHandler(runner: runner).register(router);
 
-    // Total: 4 + 2 + 10 + 4 + 8 + 5 + 1 = 34. If any duplicate path existed,
+    // Total: 4 + 2 + 10 + 5 + 8 + 5 + 1 = 35. If any duplicate path existed,
     // the Map in BridgeRouter would collapse them and the count would be less.
-    expect(router.routeCount, 34);
+    expect(router.routeCount, 35);
   });
 }
