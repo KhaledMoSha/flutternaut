@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutternaut/src/bridge/engine/gesture_dispatcher.dart';
 import 'package:flutternaut/src/bridge/engine/main_thread_runner.dart';
 import 'package:flutternaut/src/bridge/engine/tree_walker.dart';
 import 'package:flutternaut/src/bridge/handlers/assert_handler.dart';
 import 'package:flutternaut/src/bridge/handlers/gesture_handler.dart';
 import 'package:flutternaut/src/bridge/handlers/query_handler.dart';
-import 'package:flutternaut/src/bridge/engine/gesture_dispatcher.dart';
 import 'package:flutternaut/src/bridge/router.dart';
 
 import 'handlers/route_harness.dart';
@@ -89,9 +89,10 @@ void main() {
       final has =
           await post(tester, '/assert_text_contains', {'text': 'Automation'});
       expect(has['passed'], isFalse);
-      // The hint is faded out once the field is filled: not visible either.
+      // The hint is the field's declared name: faded out once the field is
+      // filled, it still resolves to the field, which is visible (1.11.1).
       final hint = await post(tester, '/is_visible', {'text': 'Search'});
-      expect(hint['visible'], isFalse);
+      expect(hint['visible'], isTrue, reason: '$hint');
     });
 
     testWidgets('a row showing the typed text is the only match, nth 0',
@@ -178,8 +179,9 @@ void main() {
       expect(empty['text'], '');
     });
 
-    testWidgets('get_text by the hint reads the value; a heading reads itself',
-        (tester) async {
+    testWidgets(
+        'get_text by the hint reads the value; a caption right above '
+        'the field reads the field too (1.11.1)', (tester) async {
       await tester.pumpWidget(_app(Column(children: [
         const Text('Search'),
         TextField(
@@ -188,7 +190,8 @@ void main() {
         ),
       ])));
       final heading = await post(tester, '/get_text', {'text': 'Search'});
-      expect(heading['text'], 'Search');
+      expect(heading['text'], query,
+          reason: 'a caption beside a field names it on the read routes');
       final value = await post(tester, '/get_text', {'text': 'Search shops'});
       expect(value['text'], query);
       final found = await post(tester, '/get_text', {'text': query});
@@ -218,8 +221,8 @@ void main() {
       final all = _flatten(walker.dumpVisibleTree()['elements'] as List);
       // A filled field's name rides on its EditableText node (the one
       // carrying the value), found here by that value.
-      Map<String, dynamic> byValue(String v) => all
-          .singleWhere((n) => n['type'] == 'EditableText' && n['text'] == v);
+      Map<String, dynamic> byValue(String v) =>
+          all.singleWhere((n) => n['type'] == 'EditableText' && n['text'] == v);
       // Two fields share the hint: the name resolves to the first in tree
       // order (as /type and /clear_text resolve it), so only that field
       // carries it; the second has no name of its own.

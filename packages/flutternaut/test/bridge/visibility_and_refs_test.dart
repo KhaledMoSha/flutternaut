@@ -706,9 +706,13 @@ void main() {
 
       expect(walker.checkTextVisible('Search').visible, isTrue);
 
+      // Typed text fades the hint out, but the hint is the field's declared
+      // name: the locator resolves to the field, which is visible (1.11.1).
       controller.text = 'latte';
       await tester.pump();
-      expect(walker.checkTextVisible('Search').visible, isFalse);
+      expect(walker.checkTextVisible('Search').visible, isTrue);
+      expect(walker.checkTextVisible('latte').visible, isFalse,
+          reason: 'a value is not text on screen');
     });
   });
 

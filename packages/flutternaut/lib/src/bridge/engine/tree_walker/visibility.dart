@@ -27,7 +27,7 @@ extension TreeWalkerVisibility on TreeWalker {
     int? nth,
   }) {
     return _checkVisibility(
-      findAllElementsByTextMatch(text, match),
+      fieldAwareMatches(findAllElementsByTextMatch(text, match)),
       match.describe(text),
       nth: nth,
     );

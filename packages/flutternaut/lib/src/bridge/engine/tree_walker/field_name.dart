@@ -5,57 +5,52 @@ part of '../tree_walker.dart';
 // ---------------------------------------------------------------------------
 //
 // A text locator never matches what a text field holds (bridge protocol
-// 1.10.0, [_drawnText]). A field is therefore named by its key, by the text
-// drawn inside it — its `labelText` / `hintText` / `placeholder`, faded out
-// once the field is filled but still its name — or by a caption beside it.
-// The `/screen` dump carries that name as `field_name` on the field's node,
-// so a filled field keeps the locator it had when empty, and the read routes
-// (`/get_text`, `/read`, `/wait_for_text`) answer with the field's value when
-// a locator names the field.
+// 1.10.0, [_drawnText]). A field is therefore named by its key, by the name
+// its decoration declares — `labelText` / `hintText` / `placeholder`, faded
+// out once the field is filled but still its name — or by a caption beside
+// it (protocol 1.11.1). The `/screen` dump carries the declared name as
+// `field_name` on the field's node, so a filled field keeps the locator it
+// had when empty; the field routes (`/type`, `/clear_text`, `/get_text`,
+// `/read`, `/wait_for_text`) act on the field a name or caption resolves to,
+// and a declared name resolves to the field on the visibility and tap routes
+// too ([fieldAwareMatches]).
 
 /// A field's name and reading a field through it.
 extension TreeWalkerFieldName on TreeWalker {
   /// The name of the field [fieldOrEditable] is (a [TextField] /
   /// [CupertinoTextField] wrapper, or the [EditableText] inside one): the
-  /// first text with a letter or digit drawn inside the wrapper, outside
-  /// the input itself, in tree order, whatever its opacity, that is not
-  /// below the input (helper, error and counter text sit under it). Kept
-  /// only when that text resolves back to this very field
-  /// ([_resolveEditableElementByText]): two fields sharing a hint, or a
-  /// heading drawn earlier with the same text, leave the field unnamed.
-  /// Null for a bare [EditableText] with no wrapper.
+  /// text its decoration declares — `InputDecoration.labelText`, else
+  /// `hintText`, else a Cupertino `placeholder` — trimmed, with a letter or
+  /// digit in it. Never a text merely drawn inside the wrapper (a dial-code
+  /// prefix, a counter, helper or error text): those are not the field's
+  /// name, and a person calls the field by its label or hint. Kept only
+  /// when that name resolves back to this very field
+  /// ([_resolveEditableElementByText]): two fields sharing a hint leave the
+  /// second unnamed. Null for a bare [EditableText] with no wrapper, and
+  /// for a field that declares no name (a caption beside it names it then,
+  /// see [findReadableByTextMatch]).
   String? fieldNameOf(Element fieldOrEditable) {
     final wrapper = _fieldWrapperOf(fieldOrEditable);
     if (wrapper == null) return null;
     final editable = _editableOf(wrapper);
     if (editable == null) return null;
-    final inputRect = _rectOf(editable);
-    final inputBottom =
-        inputRect == null ? null : inputRect.y + inputRect.height;
+    final name = _declaredName(wrapper.widget);
+    if (name == null) return null;
+    final resolved = _resolveEditableElementByText(name);
+    return resolved != null && identical(resolved, editable) ? name : null;
+  }
 
-    String? name;
-    void visit(Element child) {
-      if (name != null || identical(child, editable)) return;
-      final text = _drawnText(child.widget);
-      if (text != null) {
-        if (!_hasAlnum(text)) return;
-        final rect = _rectOf(child);
-        if (inputBottom != null &&
-            rect != null &&
-            rect.y + rect.height / 2 > inputBottom) {
-          return;
-        }
-        name = text;
-        return;
-      }
-      child.visitChildren(visit);
+  /// The name a field wrapper declares for itself, or null.
+  String? _declaredName(Widget wrapper) {
+    String? raw;
+    if (wrapper is TextField) {
+      final d = wrapper.decoration;
+      raw = d?.labelText ?? d?.hintText;
+    } else if (wrapper is CupertinoTextField) {
+      raw = wrapper.placeholder;
     }
-
-    wrapper.visitChildren(visit);
-    final found = name;
-    if (found == null) return null;
-    final resolved = _resolveEditableElementByText(found);
-    return resolved != null && identical(resolved, editable) ? found : null;
+    final name = raw == null ? null : TreeWalker.normalizeText(raw);
+    return name == null || !_hasAlnum(name) ? null : name;
   }
 
   /// The [TextField] / [CupertinoTextField] element that is
@@ -76,15 +71,50 @@ extension TreeWalkerFieldName on TreeWalker {
   }
 
   /// The element a text locator reads: the first drawn match of [text] in
-  /// [match] mode — or, when that text names a field (it is drawn inside a
-  /// [TextField] / [CupertinoTextField]: a label, a hint, a placeholder),
-  /// the field itself, whose [ElementInfo.text] is its value (`""` when
-  /// empty). A caption beside a field reads itself. Null when nothing
-  /// matches.
+  /// [match] mode — or, when that text names a field, the field itself,
+  /// whose [ElementInfo.text] is its value (`""` when empty). A text names a
+  /// field when it is drawn inside a [TextField] / [CupertinoTextField]
+  /// (its label, hint or placeholder — [_fieldNamedBy]) or when it is a
+  /// caption beside one: the on-screen field on the same row or just below
+  /// it, within a row's height ([_nearestFieldElement]) — the one rule
+  /// `/type` and `/clear_text` already name a field by, so the label that
+  /// types into a field is the label that reads it. A text with no field to
+  /// name reads itself. Known limit: a heading drawn right above an
+  /// unrelated field, within a row, reads that field; a wrong expected
+  /// value then fails, never passes. Null when nothing matches.
   ElementInfo? findReadableByTextMatch(String text, TextMatch match) {
-    final el = _findElementWhere(_textMatcher(text, match));
+    final layers = _routeLayers();
+    Element? el;
+    for (final match in _findAllElementsWhere(_textMatcher(text, match))) {
+      if (layers.hides(match) || _isOffstage(match)) continue;
+      el = match;
+      break;
+    }
     if (el == null) return null;
-    final field = _fieldNamedBy(el);
-    return extractInfo(field ?? el);
+    final named = _fieldNamedBy(el);
+    if (named != null) return extractInfo(named);
+    final rect = _rectOf(el);
+    final beside = rect == null ? null : _nearestFieldElement(rect, layers);
+    return extractInfo(beside ?? el);
+  }
+
+  /// [matches] of a text locator with every match that is drawn inside a
+  /// field wrapper (its label, hint or placeholder — [_fieldNamedBy])
+  /// replaced by that field's [EditableText], in order, each field once.
+  /// Applied only when every match names a field: the catalog hands out a
+  /// field's hint as its locator, and the hint is faded out once the field
+  /// is filled — a visibility check on that locator judges the field, not
+  /// the hint. Taps keep resolving the hint themselves (a field under an
+  /// `AbsorbPointer` is reached through the handler over it). A caption
+  /// beside a field is never mapped here: it stays the caption.
+  List<Element> fieldAwareMatches(List<Element> matches) {
+    if (matches.isEmpty) return matches;
+    final mapped = <Element>[];
+    for (final m in matches) {
+      final field = _fieldNamedBy(m);
+      if (field == null) return matches;
+      if (!mapped.any((e) => identical(e, field))) mapped.add(field);
+    }
+    return mapped;
   }
 }

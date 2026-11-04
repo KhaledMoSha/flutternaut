@@ -165,7 +165,20 @@ class HealthHandler {
   /// inactive tab, an offstage overlay entry) never counts as moving, for
   /// this, `/wait_for_idle` and the dump's `animating`. `/multi_tap` passes
   /// the full tap gate (an occluded target is refused). No route changes.
-  static const String protocolVersion = '1.11.0';
+  ///
+  /// 1.11.1 — a field is named by what its decoration declares (`labelText`,
+  /// else `hintText`, else a Cupertino `placeholder`), never by a text merely
+  /// drawn inside it (a dial-code prefix, a counter): the dump's
+  /// `field_name` follows. A caption beside a field names it on the field
+  /// routes: `/get_text`, `/read`, `/wait_for_text`, `/find` and
+  /// `/assert_exists` answer for the on-screen field on the same row or just
+  /// below the caption — the rule `/type` and `/clear_text` already use — so
+  /// the label that types into a field is the label that asserts its value
+  /// (`wait_text`). A declared name resolves to the field on `/is_visible`,
+  /// the waits and the assertions too (the hint is faded out once the field
+  /// is filled; the field is judged instead); taps are unchanged. A caption
+  /// is never mapped for visibility or taps.
+  static const String protocolVersion = '1.11.1';
 
   final TreeWalker _walker;
   final MainThreadRunner _runner;
